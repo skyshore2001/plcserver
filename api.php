@@ -190,5 +190,6 @@ class SwooleEnv extends JDEnv
 }
 
 AC_Timer::init();
+AC_Plc::init();
 
 // vi: foldmethod=marker
