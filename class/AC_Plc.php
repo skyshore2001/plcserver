@@ -105,7 +105,12 @@ class AC_Plc extends JDApiBase
 
 			if (count($watchItems) > 0) { // {itemCode=>item}
 				go(function () use ($plcConf, $watchItems) {
-					self::handleWatchItems($plcConf, $watchItems);
+					try {
+						self::handleWatchItems($plcConf, $watchItems);
+					}
+					catch (Exception $ex) {
+						echo("*** handleWatchItems fails: $ex\n");
+					}
 				});
 			}
 		}

@@ -189,7 +189,14 @@ class SwooleEnv extends JDEnv
 	}
 }
 
-AC_Timer::init();
-AC_Plc::init();
+try {
+	AC_Timer::init();
+	AC_Plc::init();
+}
+catch (Exception $ex) {
+	echo("*** init fails: $ex\n");
+	global $server;
+	$server->shutdown();
+}
 
 // vi: foldmethod=marker
