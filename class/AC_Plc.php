@@ -49,6 +49,7 @@ class AC_Plc extends JDApiBase
 		if (!$found)
 			jdRet(E_PARAM, "unknown plc $plcCode");
 		self::writeItems($plcConf, $items);
+		return "write plc ok";
 	}
 
 	static protected function readItems($plcConf, $items, $plcObj = null) {

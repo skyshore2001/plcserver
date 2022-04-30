@@ -113,41 +113,10 @@ class S7Plc
 		}
 
 		$readPacket = $this->buildReadPacket($items1);
-		$fp = $this->getConn();
-		if ($fp === false)
+		$res = $this->isoExchangeBuffer($readPacket, $pos);
+		if ($res === false)
 			return false;
-		$rv = fwrite($fp, $readPacket);
 
-		$res = fread($fp, 4096);
-		if (!$res) {
-			$this->error = "receive null response";
-			return false;
-		}
-
-		$version = unpack("C", $res[0])[1]; // TPKT check
-		if ($version != 3) {
-			$this->error = "bad response: bad protocol";
-			return false;
-		}
-		$payloadSize = unpack("n", substr($res,2,2))[1]; // TODO: check size
-		// TODO: 包可能没收全
-
-		$pos = 7; // TPKT+COTP
-		$S7ResHeader23 = myunpack(substr($res, $pos, 12), [
-			"C", "P", // Telegram ID, always 0x32
-			"C", "PDUType", // Header type 2 or 3
-			"n", "AB_EX",
-			"n", "Sequence",
-			"n", "ParamLen",
-			"n", "DataLen",
-			"n", "Error"
-		]);
-		if ($S7ResHeader23['Error']!=0) {
-			$this->error = 'server returns error: ' . $S7ResHeader23['Error'];
-			return false;
-		}
-
-		$pos += 12;
 		$ResParams = myunpack(substr($res, $pos, 2), [
 			"C", "FunRead",
 			"C", "ItemCount"
@@ -212,42 +181,10 @@ class S7Plc
 			];
 		}
 		$writePacket = $this->buildWritePacket($items1);
-
-		$fp = $this->getConn();
-		if ($fp === false)
+		$res = $this->isoExchangeBuffer($writePacket, $pos);
+		if ($res === false)
 			return false;
-		$rv = fwrite($fp, $writePacket);
 
-		$res = fread($fp, 4096);
-		if (!$res) {
-			$this->error = "receive null response";
-			return false;
-		}
-
-		$version = unpack("C", $res[0])[1]; // TPKT check
-		if ($version != 3) {
-			$this->error = "bad response: bad protocol";
-			return false;
-		}
-		$payloadSize = unpack("n", substr($res,2,2))[1]; // TODO: check size
-		// TODO: 包可能没收全
-
-		$pos = 7; // TPKT+COTP
-		$S7ResHeader23 = myunpack(substr($res, $pos, 12), [
-			"C", "P", // Telegram ID, always 0x32
-			"C", "PDUType", // Header type 2 or 3
-			"n", "AB_EX",
-			"n", "Sequence",
-			"n", "ParamLen",
-			"n", "DataLen",
-			"n", "Error"
-		]);
-		if ($S7ResHeader23['Error']!=0) {
-			$this->error = 'server returns error: ' . $S7ResHeader23['Error'];
-			return false;
-		}
-
-		$pos += 12;
 		$ResParams = myunpack(substr($res, $pos, 2), [
 			"C", "FunWrite",
 			"C", "ItemCount"
@@ -346,7 +283,7 @@ class S7Plc
 				"C", 0x0A,
 				"C", 0x10,
 				"C", self::$typeMap[$t]["WordLen"],
-				"n", $item["amount"], //  * self::$typeMap[$t]["len"],
+				"n", $item["amount"],
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
 				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
@@ -395,6 +332,46 @@ class S7Plc
 		]);
 
 		return $TPKT . $COTP . $payload;
+	}
+
+	// $pos: ResParam开始位置
+	protected function isoExchangeBuffer($req, &$pos) {
+		$fp = $this->getConn();
+		if ($fp === false)
+			return false;
+		$rv = fwrite($fp, $req);
+
+		$res = fread($fp, 4096);
+		if (!$res) {
+			$this->error = "receive null response";
+			return false;
+		}
+
+		$version = unpack("C", $res[0])[1]; // TPKT check
+		if ($version != 3) {
+			$this->error = "bad response: bad protocol";
+			return false;
+		}
+		$payloadSize = unpack("n", substr($res,2,2))[1]; // TODO: check size
+		// TODO: 包可能没收全
+
+		$pos = 7; // TPKT+COTP
+		$S7ResHeader23 = myunpack(substr($res, $pos, 12), [
+			"C", "P", // Telegram ID, always 0x32
+			"C", "PDUType", // Header type 2 or 3
+			"n", "AB_EX",
+			"n", "Sequence",
+			"n", "ParamLen",
+			"n", "DataLen",
+			"n", "Error"
+		]);
+		if ($S7ResHeader23['Error']!=0) {
+			$this->error = 'server returns error: ' . $S7ResHeader23['Error'];
+			return false;
+		}
+		$pos += 12;
+
+		return $res;
 	}
 }
 

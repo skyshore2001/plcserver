@@ -1,0 +1,48 @@
+{
+"plc1": {
+ "addr":"s7://127.0.0.1",
+ "items": {
+  "id": {
+   "addr": "DB21.0:int32",
+   "dscr": "task1Id",
+   "watch1": [ "result" ]
+  },
+  "value": {
+   "addr": "DB21.4:float",
+   "watch1": [ "result" ]
+  },
+  "result": {
+   "addr": "DB21.8:float"
+  }
+ },
+ "notifyUrl1": "http://localhost/tighten/api/datachange",
+ "notifyUrl": "http://oliveche.com/echo.php"
+},
+"plc2": {
+ "disabled": true,
+ "addr":"s7://localhost",
+ "addr-1":"modbus://localhost",
+ "items": {
+  "task1Id": {
+   "addr": "holding-register:1:DINT",
+   "dscr": "task1Id",
+   "type": "int32",
+   "watch": [ "result" ]
+  },
+  "sn": {
+   "addr":"holding-register:5:WSTRING"
+  },
+  "device": {
+   "addr":"holding-register:9:STRING"
+  },
+  "job": {
+   "addr":"holding-register:3:REAL"
+  },
+  "result": {
+   "addr":"holding-register:11:INT"
+  }
+ },
+ "notifyUrl1": "http://localhost/tighten/api/datachange",
+ "notifyUrl": "http://oliveche.com/echo.php"
+}
+}
