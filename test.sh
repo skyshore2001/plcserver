@@ -31,7 +31,7 @@
 #curl 'localhost:8081/Timer/enable?code=app1-task-101'
 #curl 'localhost:8081/Timer/query' 
 
-curl 'localhost:8081/Plc/write?code=plc1' -H "content-type: application/json" -d '{"id":30000, "value":3.14, "result":987.654321}' 
+curl 'localhost:8081/Plc/write?code=plc1' -H "content-type: application/json" -d '{"byteVal":240, "intVal":30000, "dintVal":999999, "floatVal":987.6543, "bitVal":1, "bitVal2":0}' 
 
 #curl 'localhost:8081/Plc/test' 
-curl 'localhost:8081/Plc/read?code=plc1&items=id,value,result' 
+curl 'localhost:8081/Plc/read?code=plc1&items=byteVal,intVal,dintVal,floatVal,bitVal,bitVal2' 

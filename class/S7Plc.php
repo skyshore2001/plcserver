@@ -164,7 +164,12 @@ class S7Plc
 		$items1 = [];
 		foreach ($items as $item) { // item: [addr, value]
 			$item1 = $this->parseItem($item[0]);
-			$item1["value"] = $item[1];
+			if ($item1["type"] == "bit") {
+				$item1["value"] = $item[1] ? 1: 0;
+			}
+			else {
+				$item1["value"] = $item[1];
+			}
 			$items1[] = $item1;
 		}
 		$writePacket = $this->buildWritePacket($items1);

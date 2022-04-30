@@ -2,17 +2,24 @@
 "plc1": {
  "addr":"s7://127.0.0.1",
  "items": {
-  "id": {
-   "addr": "DB21.0:int32",
-   "dscr": "task1Id",
-   "watch1": [ "result" ]
+  "byteVal": {
+   "addr": "DB21.0:int8"
   },
-  "value": {
-   "addr": "DB21.4:float",
-   "watch1": [ "result" ]
+  "intVal": {
+   "addr": "DB21.2:int16",
+   "watch1": [ "bitVal", "bitVal2", "floatVal", "dintVal" ]
   },
-  "result": {
+  "dintVal": {
+   "addr": "DB21.4:int32"
+  },
+  "floatVal": {
    "addr": "DB21.8:float"
+  },
+  "bitVal": {
+   "addr": "DB21.8.0:bit"
+  },
+  "bitVal2": {
+   "addr": "DB21.8.1:bit"
   }
  },
  "notifyUrl1": "http://localhost/tighten/api/datachange",
