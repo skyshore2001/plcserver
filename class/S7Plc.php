@@ -96,20 +96,14 @@ class S7Plc
 		return $this->error;
 	}
 
-	// items: ["DB21.0:int32", "DB21.4:float"]
+	// items: ["DB21.0:int32", "DB21.4:float", "DB21.0.0:bit"]
 	function read($items) {
 		$items1 = [];
 		foreach ($items as $addr) {
-			if (! preg_match('/^DB(\d+)\.(\d+):(\w+)(?:\[(\d+)\])?$/', $addr, $ms)) {
-				$this->error = "bad plc item addr: $addr";
+			$item = $this->parseItem($addr);
+			if ($item === false)
 				return false;
-			}
-			$items1[] = [
-				"dbNumber"=>$ms[1],
-				"startAddr"=>$ms[2],
-				"type"=>$ms[3],
-				"amount" => ($ms[4]?:1)
-			];
+			$items1[] = $item;
 		}
 
 		$readPacket = $this->buildReadPacket($items1);
@@ -168,17 +162,11 @@ class S7Plc
 	function write($items) {
 		$items1 = [];
 		foreach ($items as $item) { // item: [addr, value]
-			if (! preg_match('/^DB(\d+)\.(\d+):(\w+)(?:\[(\d+)\])?$/', $item[0], $ms)) {
-				$this->error = "bad plc item addr: $addr";
+			$item1 = $this->parseItem($item[0]);
+			if ($item1 === false)
 				return false;
-			}
-			$items1[] = [
-				"dbNumber"=>$ms[1],
-				"startAddr"=>$ms[2],
-				"type"=>$ms[3],
-				"amount" => ($ms[4]?:1),
-				"value" => $item[1]
-			];
+			$item1["value"] = $item[1];
+			$items1[] = $item1;
 		}
 		$writePacket = $this->buildWritePacket($items1);
 		$res = $this->isoExchangeBuffer($writePacket, $pos);
@@ -238,7 +226,7 @@ class S7Plc
 				"n", $item["amount"],
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
-				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
+				"N", (0x84000000 | ($item["startAddr"] * 8 + $item["bit"])) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
 			]);
 			$ReqParams .= $ReqFunReadItem;
 		}
@@ -286,7 +274,7 @@ class S7Plc
 				"n", $item["amount"],
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
-				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
+				"N", (0x84000000 | ($item["startAddr"] * 8 + $item["bit"])) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
 			]);
 			$ReqParams .= $ReqFunWriteItem;
 			// ReqFunWriteDataItem 值在所有WriteItem之后
@@ -372,6 +360,21 @@ class S7Plc
 		$pos += 12;
 
 		return $res;
+	}
+
+	// return: {dbNumber, startAddr, type, amount}
+	protected function parseItem($itemAddr) {
+		if (! preg_match('/^DB(?<db>\d+) \.(?<addr>\d+) (?:\.(?<bit>\d+))? :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
+			$this->error = "bad plc item addr: `$itemAddr`";
+			return false;
+		}
+		return [
+			"dbNumber"=>$ms["db"],
+			"startAddr"=>$ms["addr"],
+			"bit"=>$ms["bit"]?:0,
+			"type"=>$ms["type"],
+			"amount" => ($ms["amount"]?:1)
+		];
 	}
 }
 
