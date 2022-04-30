@@ -27,6 +27,30 @@ class AC_Plc extends JDApiBase
 		return self::readItems($plcConf, $items);
 	}
 
+	function api_write() {
+		$confStr = file_get_contents("plc.json");
+		$conf = jsonDecode($confStr);
+		if (!$conf)
+			jdRet(E_SERVER, "bad conf plc.json");
+		$plcCode = mparam("code");
+		$items = $this->env->_POST;
+		if (count($items) == 0)
+			return;
+
+		$found = false;
+		foreach ($conf as $plcCode0 => $plcConf) {
+			if ($plcCode0 == $plcCode) {
+				if ($plcConf["disabled"])
+					jdRet(E_FORBIDDEN, "plc $plcCode is disabled");
+				$found = true;
+				break;
+			}
+		}
+		if (!$found)
+			jdRet(E_PARAM, "unknown plc $plcCode");
+		self::writeItems($plcConf, $items);
+	}
+
 	static protected function readItems($plcConf, $items, $plcObj = null) {
 		$items1 = [];
 		foreach ($items as $itemCode) {
@@ -50,6 +74,29 @@ class AC_Plc extends JDApiBase
 			jdRet(E_EXT, "fail to read plc", "读数据失败");
 		$ret = array_combine($items, $res);
 		return $ret;
+	}
+
+	static protected function writeItems($plcConf, $items, $plcObj = null) {
+		$items1 = []; // elem: [addr, value]
+		foreach ($items as $itemCode=>$value) { // code=>value
+			$found = false;
+			foreach ($plcConf["items"] as $itemCode0 => $item) {
+				if ($itemCode == $itemCode0) {
+					$items1[] = [$item["addr"], $value];
+					$found = true;
+				}
+			}
+			if (!$found)
+				jdRet(E_PARAM, "unknown plc item: $plcCode.$itemCode");
+		}
+		if ($plcObj) {
+			$res = $plcObj->write($items1);
+		}
+		else {
+			$res = Plc::writePlc($plcConf["addr"], $items1);
+		}
+		if ($res === false)
+			jdRet(E_EXT, "fail to write plc", "写数据失败");
 	}
 
 	static protected function handleWatchItems($plcConf, $watchItems) {
@@ -138,6 +185,11 @@ class Plc
 	static function readPlc($addr, $items) {
 		$plc = self::create($addr);
 		return $plc->read($items);
+	}
+
+	static function writePlc($addr, $items) {
+		$plc = self::create($addr);
+		$plc->write($items);
 	}
 
 	static function watchPlc($addr, $items, $cb) {

@@ -21,6 +21,7 @@ Usage (level 2): read and write in one connection (long connection)
 	// $plc = null; // close connection immediately
 
 Read Request/Response Packet:
+(refer to: s7_micro_client.cpp opReadMultiVars/opWriteMultiVars)
 
 	TPKT 4B
 	COTP 3B
@@ -42,6 +43,19 @@ class S7Plc
 	public $error;
 	protected $addr;
 	protected $fp;
+
+	static protected $typeMap = [
+		// enum: bit:1, byte:2, char:3, word:4(uint16), int:5(int16), dword=6(uint32), dint=7(int32), real=8
+		// TransportSizeForWrite: TS_ResBit=0x03, byte=0x04, int=0x05, real=0x07, octet=0x09
+		"bit" => ["fmt"=>"C", "len"=>1, "enum"=>1, "TransportSizeForWrite"=>0x03],
+		"int8" => ["fmt"=>"C", "len"=>1, "enum"=>2, "TransportSizeForWrite"=>0x04],
+		"int16" => ["fmt"=>"n", "len"=>2, "enum"=>5, "TransportSizeForWrite"=>0x05],
+		"int32" => ["fmt"=>"N", "len"=>4, "enum"=>7, "TransportSizeForWrite"=>0x05],
+		"float" => ["fmt"=>"f", "len"=>8, "enum"=>8, "TransportSizeForWrite"=>0x07],
+		"char" => ["fmt"=>"a", "len"=>1, "enum"=>3, "TransportSizeForWrite"=>0x09]
+		// "double"
+		// "string[]"
+	];
 
 	function __construct($addr) {
 		$this->addr = $addr;
@@ -136,12 +150,6 @@ class S7Plc
 		$pos += 2;
 
 		// S7DataItem
-		$typeMap = [
-			"int8" => "C",
-			"int16" => "n",
-			"int32" => "V",
-			"float" => "f",
-		];
 		$ret = [];
 		for ($i = 0; $i < count($items1); $i++) {
 			$ResData = myunpack(substr($res, $pos, 10), [
@@ -164,8 +172,9 @@ class S7Plc
 			}
 			$pos += 4;
 			$value = substr($res, $pos, $len);
-			$type = $typeMap[$items1[$i]['type']];
-			$value1 = unpack($type, $value)[1];
+			$type = $items1[$i]["type"];
+			$fmt = self::$typeMap[$type]["fmt"];
+			$value1 = unpack($fmt, $value)[1]; // TODO: use mypack
 			$ret[] = $value1;
 
 			if ($len % 2 != 0) {
@@ -176,6 +185,87 @@ class S7Plc
 		return $ret;
 	}
 
+	// items: [ ["DB21.0:int32", 70000], ["DB21.4:float", 3.14] ]
+	// refer to: opWriteMultiVars (snap7 lib)
+	function write($items) {
+		$items1 = [];
+		foreach ($items as $item) { // item: [addr, value]
+			if (! preg_match('/^DB(\d+)\.(\d+):(\w+)(?:\[(\d+)\])?$/', $item[0], $ms)) {
+				$this->error = "bad plc item addr: $addr";
+				return false;
+			}
+			$items1[] = [
+				"dbNumber"=>$ms[1],
+				"startAddr"=>$ms[2],
+				"type"=>$ms[3],
+				"amount" => ($ms[4]?:1),
+				"value" => $item[1]
+			];
+		}
+		$writePacket = $this->buildWritePacket($items1);
+
+		$fp = $this->getConn();
+		if ($fp === false)
+			return false;
+		$rv = fwrite($fp, $readPacket);
+
+		$res = fread($fp, 4096);
+		if (!$res) {
+			$this->error = "receive null response";
+			return false;
+		}
+
+		$version = unpack("C", $res[0])[1]; // TPKT check
+		if ($version != 3) {
+			$this->error = "bad response: bad protocol";
+			return false;
+		}
+		$payloadSize = unpack("n", substr($res,2,2))[1]; // TODO: check size
+		// TODO: 包可能没收全
+
+		$pos = 7; // TPKT+COTP
+		$S7ResHeader23 = myunpack(substr($res, $pos, 12), [
+			"C", "P", // Telegram ID, always 0x32
+			"C", "PDUType", // Header type 2 or 3
+			"n", "AB_EX",
+			"n", "Sequence",
+			"n", "ParamLen",
+			"n", "DataLen",
+			"n", "Error"
+		]);
+		if ($S7ResHeader23['Error']!=0) {
+			$this->error = 'server returns error: ' . $S7ResHeader23['Error'];
+			return false;
+		}
+
+		$pos += 12;
+		$ResParams = myunpack(substr($res, $pos, 2), [
+			"C", "FunWrite",
+			"C", "ItemCount"
+		]);
+		if ($ResParams["ItemCount"] != count($items)) {
+			$this->error = 'bad server item count: ' . $ResParams["ItemCount"];
+			return false;
+		}
+		$pos += 2;
+
+		// TResFunWrite
+		$ret = [];
+		for ($i = 0; $i < count($items1); $i++) {
+			$ResData = myunpack(substr($res, $pos, 10), [
+				"C", "ReturnCode",
+				"C", "TransportSize",
+				"n", "DataLen",
+				// data
+			]);
+			$retCode = $ResData["ReturnCode"];
+			if ($retCode != 0xff) { // <-- 0xFF means Result OK
+				$this->error = "fail to read {$items1[$i]}: return code=$retCode";
+				return false;
+			}
+		}
+	}
+
 	static function readPlc($addr, $items, &$error) {
 		$plc = new S7Plc($addr);
 		$rv = $plc->read($items);
@@ -183,32 +273,102 @@ class S7Plc
 			$error = $plc->error;
 		return $rv;
 	}
+	static function writePlc($addr, $items, &$error) {
+		$plc = new S7Plc($addr);
+		$rv = $plc->write($items);
+		if ($rv === false)
+			$error = $plc->error;
+		return $rv;
+	}
 
-	// items: [{ dbNumber, type=int8/int16/int32/float/double, startAddr, amount }]
+	// items: [{ dbNumber, type=int8/int16/int32/float/double, startAddr, amount, value }]
 	protected function buildReadPacket($items) {
 		$ReqParams = mypack([
 			"C", 0x04, // FunRead=pduFuncRead
 			"C", count($items), // ItemsCount
 		]);
-		$lenMap = [
-			"int8" => 1,
-			"int16" => 2,
-			"int32" => 4,
-			"float" => 4,
-			"double" => 8
-		];
 		foreach ($items as $item) {
+			$t = $item["type"];
 			$ReqFunReadItem = mypack([
-				'C', 0x12,
-				'C', 0x0A,
-				'C', 0x10,
-				'C', 0x02,// bit:1, byte:2, char:3, word:4, int:5, dword=6, dint=7, real=8
-				"n", $item['amount'] * $lenMap[$item['type']],
-				"n", $item['dbNumber'],
-				// 'C', 0x84, // area: S7AreaDB; 位置: 8
-				'N', (0x84000000 | ($item['startAddr'] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
+				"C", 0x12,
+				"C", 0x0A,
+				"C", 0x10,
+				"C", self::$typeMap[$t]["enum"], // type id
+				"n", $item["amount"], //  * self::$typeMap[$t]["len"],
+				"n", $item["dbNumber"],
+				// "C", 0x84, // area: S7AreaDB; 位置: 8
+				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
 			]);
 			$ReqParams .= $ReqFunReadItem;
+		}
+		$RPSize = strlen($ReqParams);
+
+		$S7ReqHeader = mypack([
+			"C", 0x32, // Telegram ID, always 32
+			"C", 0x01, // PduType_request
+			"n", 0, // AB_EX: AB currently unknown, maybe it can be used for long numbers.
+			"n", 0, // Sequence; // Message ID. This can be used to make sure a received answer; TODO: GetNextWord
+			"n", $RPSize, // Length of parameters which follow this header
+			"n", 0 // DataLen: Length of data which follow the parameters; 0: No data in output
+		]);
+		$payload = $S7ReqHeader . $ReqParams;
+		$TPKT = mypack([
+			"C", 3, // version: isoTcpVersion
+			"C", 0, // reserved: 0
+			"n", strlen($payload)+7, // length + header length
+		]);
+		$COTP = mypack([
+			"C", 2, // headerLength(下面2B)
+			"C", 0xF0, // PDUType: pdu_type_DT
+			"C", 0x80, // EoT_Num: pdu_EoT
+		]);
+
+		return $TPKT . $COTP . $payload;
+	}
+
+	// items: [{ dbNumber, type=int8/int16/int32/float/double, startAddr, amount }]
+	protected function buildWritePacket($items) {
+		$itemCnt = count($items);
+		$ReqParams = mypack([
+			"C", 0x05, // FunWrite=pduFuncWrite
+			"C", $itemCnt, // ItemsCount
+		]);
+		$ReqData = '';
+		$idx = 0;
+		foreach ($items as $item) {
+			$t = $item["type"];
+			$ReqFunWriteItem = mypack([
+				"C", 0x12,
+				"C", 0x0A,
+				"C", 0x10,
+				"C", self::$typeMap[$t]["enum"], // type id
+				"n", $item["amount"], //  * self::$typeMap[$t]["len"],
+				"n", $item["dbNumber"],
+				// "C", 0x84, // area: S7AreaDB; 位置: 8
+				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
+			]);
+			$ReqParams .= $ReqFunWriteItem;
+			// ReqFunWriteDataItem 值在所有WriteItem之后
+			$valuePack = pack(self::$typeMap[$t]["fmt"], $item["value"]);
+			$size = $item["amount"] * self::$typeMap[$t]["len"];
+			$TransportSize = self::$typeMap[$t]["TransportSizeForWrite"];
+			$len = $size;
+			if ($TransportSize != 0x09 /* TS_ResOctet */
+					&& $TransportSize != 0x07 /* TS_ResReal */
+					&& $TransportSize != 0x03 /* TS_ResBit */
+				) {
+				$len *= 8; // byte转bit
+			}
+			$ReqData .= mypack([
+				"C", 0x00,  // ReturnCode
+				"C", $TransportSize, // TransportSize TS_ResByte
+				"n", $len,
+			]) . $valuePack;
+			// Skip fill byte for Odd frame (except for the last one)
+			$idx ++;
+			if (($size % 2) != 0 && $idx != $itemCnt) {
+				$ReqData .= "\x00";
+			}
 		}
 		$RPSize = strlen($ReqParams);
 
