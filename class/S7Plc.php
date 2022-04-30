@@ -6,19 +6,24 @@
 
 Usage (level 1): read/write once (short connection)
 
-	$res = S7Plc::readPlc("192.168.1.101", ["DB21.0:int32", "DB21.4:float"], $error);
-	// on success $res=[ 30000, 3.14 ]
-	if ($res === false)
-		echo($error); // $error holds the last error message.
+	try {
+		$res = S7Plc::readPlc("192.168.1.101", ["DB21.0:int32", "DB21.4:float"]);
+		// on success $res=[ 30000, 3.14 ]
+	}
+	catch (S7PlcException $ex) {
+		echo($ex);
+	}
 
 Usage (level 2): read and write in one connection (long connection)
 
-	$plc = new S7Plc("192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
-	$res = $plc->read(["DB21.0:int32", "DB21.4:float"]);
-	// on success $res=[ 30000, 3.14 ]
-	if ($res === false)
-		echo($plc->error);
-	// $plc = null; // close connection immediately
+	try {
+		$plc = new S7Plc("192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
+		$res = $plc->read(["DB21.0:int32", "DB21.4:float"]);
+		// on success $res=[ 30000, 3.14 ]
+	}
+	catch (S7PlcException $ex) {
+		echo($ex);
+	}
 
 Read Request/Response Packet:
 (refer to: s7_micro_client.cpp opReadMultiVars/opWriteMultiVars)
@@ -47,9 +52,13 @@ Read Request/Response Packet:
 	 @Items
 	 ...
 */
+
+class S7PlcException extends LogicException 
+{
+}
+
 class S7Plc
 {
-	public $error;
 	protected $addr;
 	protected $fp;
 
@@ -84,16 +93,12 @@ class S7Plc
 				$addr .= ":102"; // default s7 port
 			$fp = fsockopen("tcp://" . $addr);
 			if ($fp === false) {
-				$this->error = "fail to open tcp connection to `$addr`";
-				return false;
+				$error = "fail to open tcp connection to `$addr`";
+				throw new S7PlcException($error);
 			}
 			$this->fp = $fp;
 		}
 		return $this->fp;
-	}
-
-	function lastError() {
-		return $this->error;
 	}
 
 	// items: ["DB21.0:int32", "DB21.4:float", "DB21.0.0:bit"]
@@ -101,23 +106,19 @@ class S7Plc
 		$items1 = [];
 		foreach ($items as $addr) {
 			$item = $this->parseItem($addr);
-			if ($item === false)
-				return false;
 			$items1[] = $item;
 		}
 
 		$readPacket = $this->buildReadPacket($items1);
 		$res = $this->isoExchangeBuffer($readPacket, $pos);
-		if ($res === false)
-			return false;
 
 		$ResParams = myunpack(substr($res, $pos, 2), [
 			"C", "FunRead",
 			"C", "ItemCount"
 		]);
 		if ($ResParams["ItemCount"] != count($items)) {
-			$this->error = 'bad server item count: ' . $ResParams["ItemCount"];
-			return false;
+			$error = 'bad server item count: ' . $ResParams["ItemCount"];
+			throw new S7PlcException($error);
 		}
 		$pos += 2;
 
@@ -132,8 +133,8 @@ class S7Plc
 			]);
 			$retCode = $ResData["ReturnCode"];
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$this->error = "fail to read {$items[$i]}: return code=$retCode";
-				return false;
+				$error = "fail to read {$items[$i]}: return code=$retCode";
+				throw new S7PlcException($error);
 			}
 			$len = $ResData['DataLen'];
 			if ($ResData['TransportSize'] != 0x09 /* TS_ResOctet */
@@ -163,23 +164,19 @@ class S7Plc
 		$items1 = [];
 		foreach ($items as $item) { // item: [addr, value]
 			$item1 = $this->parseItem($item[0]);
-			if ($item1 === false)
-				return false;
 			$item1["value"] = $item[1];
 			$items1[] = $item1;
 		}
 		$writePacket = $this->buildWritePacket($items1);
 		$res = $this->isoExchangeBuffer($writePacket, $pos);
-		if ($res === false)
-			return false;
 
 		$ResParams = myunpack(substr($res, $pos, 2), [
 			"C", "FunWrite",
 			"C", "ItemCount"
 		]);
 		if ($ResParams["ItemCount"] != count($items)) {
-			$this->error = 'bad server item count: ' . $ResParams["ItemCount"];
-			return false;
+			$error = 'bad server item count: ' . $ResParams["ItemCount"];
+			throw new S7PlcException($error);
 		}
 
 		$pos += 2;
@@ -188,26 +185,20 @@ class S7Plc
 		$i = 0;
 		foreach ($data as $retCode) {
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$this->error = "fail to write {$items[$i][0]}: return code=$retCode";
-				return false;
+				$error = "fail to write {$items[$i][0]}: return code=$retCode";
+				throw new S7PlcException($error);
 			}
 			++ $i;
 		}
 	}
 
-	static function readPlc($addr, $items, &$error) {
+	static function readPlc($addr, $items) {
 		$plc = new S7Plc($addr);
-		$rv = $plc->read($items);
-		if ($rv === false)
-			$error = $plc->error;
-		return $rv;
+		return $plc->read($items);
 	}
-	static function writePlc($addr, $items, &$error) {
+	static function writePlc($addr, $items) {
 		$plc = new S7Plc($addr);
-		$rv = $plc->write($items);
-		if ($rv === false)
-			$error = $plc->error;
-		return $rv;
+		return $plc->write($items);
 	}
 
 	// items: [{ dbNumber, type=int8/int16/int32/float/double, startAddr, amount, value }]
@@ -325,20 +316,18 @@ class S7Plc
 	// $pos: ResParam开始位置
 	protected function isoExchangeBuffer($req, &$pos) {
 		$fp = $this->getConn();
-		if ($fp === false)
-			return false;
 		$rv = fwrite($fp, $req);
 
 		$res = fread($fp, 4096);
 		if (!$res) {
-			$this->error = "receive null response";
-			return false;
+			$error = "receive null response";
+			throw new S7PlcException($error);
 		}
 
 		$version = unpack("C", $res[0])[1]; // TPKT check
 		if ($version != 3) {
-			$this->error = "bad response: bad protocol";
-			return false;
+			$error = "bad response: bad protocol";
+			throw new S7PlcException($error);
 		}
 		$payloadSize = unpack("n", substr($res,2,2))[1]; // TODO: check size
 		// TODO: 包可能没收全
@@ -354,8 +343,8 @@ class S7Plc
 			"n", "Error"
 		]);
 		if ($S7ResHeader23['Error']!=0) {
-			$this->error = 'server returns error: ' . $S7ResHeader23['Error'];
-			return false;
+			$error = 'server returns error: ' . $S7ResHeader23['Error'];
+			throw new S7PlcException($error);
 		}
 		$pos += 12;
 
@@ -365,8 +354,8 @@ class S7Plc
 	// return: {dbNumber, startAddr, type, amount}
 	protected function parseItem($itemAddr) {
 		if (! preg_match('/^DB(?<db>\d+) \.(?<addr>\d+) (?:\.(?<bit>\d+))? :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
-			$this->error = "bad plc item addr: `$itemAddr`";
-			return false;
+			$error = "bad plc item addr: `$itemAddr`";
+			throw new S7PlcException($error);
 		}
 		return [
 			"dbNumber"=>$ms["db"],
