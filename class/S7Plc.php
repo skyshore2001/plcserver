@@ -26,16 +26,25 @@ Read Request/Response Packet:
 	TPKT 4B
 	COTP 3B
 	S7ReqHeader 10B
-	ReqParam 2B
-	 ReqData
+	 ...
+	 Sequence
+	 ParamLen
+	 DataLength
+	ReqParams
+	  FunctionCode 1B
+	  ItemCount 1B
+	  @Items
+	  @Data
 	 ...
 
 
 	TPKT 4B
 	COTP 3B
 	S7ResHeader 12B
-	ResParam 2B
-	 ResData
+	ResParams 2B
+	 FunctionCode
+	 ItemCount
+	 @Items
 	 ...
 */
 class S7Plc
@@ -45,15 +54,15 @@ class S7Plc
 	protected $fp;
 
 	static protected $typeMap = [
-		// enum: bit:1, byte:2, char:3, word:4(uint16), int:5(int16), dword=6(uint32), dint=7(int32), real=8
-		// TransportSizeForWrite: TS_ResBit=0x03, byte=0x04, int=0x05, real=0x07, octet=0x09
-		"bit" => ["fmt"=>"C", "len"=>1, "enum"=>1, "TransportSizeForWrite"=>0x03],
-		"int8" => ["fmt"=>"C", "len"=>1, "enum"=>2, "TransportSizeForWrite"=>0x04],
-		"int16" => ["fmt"=>"n", "len"=>2, "enum"=>5, "TransportSizeForWrite"=>0x05],
-		"int32" => ["fmt"=>"N", "len"=>4, "enum"=>7, "TransportSizeForWrite"=>0x05],
-		"float" => ["fmt"=>"f", "len"=>8, "enum"=>8, "TransportSizeForWrite"=>0x07],
-		"char" => ["fmt"=>"a", "len"=>1, "enum"=>3, "TransportSizeForWrite"=>0x09]
-		// "double"
+		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
+		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
+		"bit" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x03],
+		"int8" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
+		"int16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x05],
+		"int32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
+		"float" => ["fmt"=>"f", "len"=>4, "WordLen"=>0x08, "TransportSize"=>0x07],
+		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x09]
+		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
 		// "string[]"
 	];
 
@@ -160,7 +169,7 @@ class S7Plc
 			]);
 			$retCode = $ResData["ReturnCode"];
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$this->error = "fail to read {$items1[$i]}: return code=$retCode";
+				$this->error = "fail to read {$items[$i]}: return code=$retCode";
 				return false;
 			}
 			$len = $ResData['DataLen'];
@@ -207,7 +216,7 @@ class S7Plc
 		$fp = $this->getConn();
 		if ($fp === false)
 			return false;
-		$rv = fwrite($fp, $readPacket);
+		$rv = fwrite($fp, $writePacket);
 
 		$res = fread($fp, 4096);
 		if (!$res) {
@@ -247,22 +256,17 @@ class S7Plc
 			$this->error = 'bad server item count: ' . $ResParams["ItemCount"];
 			return false;
 		}
-		$pos += 2;
 
-		// TResFunWrite
-		$ret = [];
-		for ($i = 0; $i < count($items1); $i++) {
-			$ResData = myunpack(substr($res, $pos, 10), [
-				"C", "ReturnCode",
-				"C", "TransportSize",
-				"n", "DataLen",
-				// data
-			]);
-			$retCode = $ResData["ReturnCode"];
+		$pos += 2;
+		$data = unpack("C".count($items), substr($res, $pos));
+
+		$i = 0;
+		foreach ($data as $retCode) {
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$this->error = "fail to read {$items1[$i]}: return code=$retCode";
+				$this->error = "fail to write {$items[$i][0]}: return code=$retCode";
 				return false;
 			}
+			++ $i;
 		}
 	}
 
@@ -293,23 +297,22 @@ class S7Plc
 				"C", 0x12,
 				"C", 0x0A,
 				"C", 0x10,
-				"C", self::$typeMap[$t]["enum"], // type id
-				"n", $item["amount"], //  * self::$typeMap[$t]["len"],
+				"C", self::$typeMap[$t]["WordLen"],
+				"n", $item["amount"],
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
 				"N", (0x84000000 | ($item["startAddr"] * 8)) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
 			]);
 			$ReqParams .= $ReqFunReadItem;
 		}
-		$RPSize = strlen($ReqParams);
 
 		$S7ReqHeader = mypack([
 			"C", 0x32, // Telegram ID, always 32
 			"C", 0x01, // PduType_request
 			"n", 0, // AB_EX: AB currently unknown, maybe it can be used for long numbers.
 			"n", 0, // Sequence; // Message ID. This can be used to make sure a received answer; TODO: GetNextWord
-			"n", $RPSize, // Length of parameters which follow this header
-			"n", 0 // DataLen: Length of data which follow the parameters; 0: No data in output
+			"n", strlen($ReqParams), // Length of parameters which follow this header
+			"n", 0 // DataLen: Length of data which follow the parameters; 0: No data in the read request
 		]);
 		$payload = $S7ReqHeader . $ReqParams;
 		$TPKT = mypack([
@@ -337,11 +340,12 @@ class S7Plc
 		$idx = 0;
 		foreach ($items as $item) {
 			$t = $item["type"];
+			// TReqFunWriteItem
 			$ReqFunWriteItem = mypack([
 				"C", 0x12,
 				"C", 0x0A,
 				"C", 0x10,
-				"C", self::$typeMap[$t]["enum"], // type id
+				"C", self::$typeMap[$t]["WordLen"],
 				"n", $item["amount"], //  * self::$typeMap[$t]["len"],
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
@@ -350,8 +354,8 @@ class S7Plc
 			$ReqParams .= $ReqFunWriteItem;
 			// ReqFunWriteDataItem 值在所有WriteItem之后
 			$valuePack = pack(self::$typeMap[$t]["fmt"], $item["value"]);
-			$size = $item["amount"] * self::$typeMap[$t]["len"];
-			$TransportSize = self::$typeMap[$t]["TransportSizeForWrite"];
+			$TransportSize = self::$typeMap[$t]["TransportSize"];
+			$size = $item["amount"] * self::$typeMap[$t]["len"]; // byte count
 			$len = $size;
 			if ($TransportSize != 0x09 /* TS_ResOctet */
 					&& $TransportSize != 0x07 /* TS_ResReal */
@@ -361,7 +365,7 @@ class S7Plc
 			}
 			$ReqData .= mypack([
 				"C", 0x00,  // ReturnCode
-				"C", $TransportSize, // TransportSize TS_ResByte
+				"C", $TransportSize, 
 				"n", $len,
 			]) . $valuePack;
 			// Skip fill byte for Odd frame (except for the last one)
@@ -370,17 +374,15 @@ class S7Plc
 				$ReqData .= "\x00";
 			}
 		}
-		$RPSize = strlen($ReqParams);
-
 		$S7ReqHeader = mypack([
 			"C", 0x32, // Telegram ID, always 32
 			"C", 0x01, // PduType_request
 			"n", 0, // AB_EX: AB currently unknown, maybe it can be used for long numbers.
 			"n", 0, // Sequence; // Message ID. This can be used to make sure a received answer; TODO: GetNextWord
-			"n", $RPSize, // Length of parameters which follow this header
-			"n", 0 // DataLen: Length of data which follow the parameters; 0: No data in output
+			"n", strlen($ReqParams), // Length of parameters which follow this header
+			"n", strlen($ReqData) // DataLen: Length of data which follow the parameters
 		]);
-		$payload = $S7ReqHeader . $ReqParams;
+		$payload = $S7ReqHeader . $ReqParams . $ReqData;
 		$TPKT = mypack([
 			"C", 3, // version: isoTcpVersion
 			"C", 0, // reserved: 0

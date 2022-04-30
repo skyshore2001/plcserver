@@ -64,14 +64,14 @@ class AC_Plc extends JDApiBase
 			if (!$found)
 				jdRet(E_PARAM, "unknown plc item: $plcCode.$itemCode");
 		}
-		if ($plcObj) {
-			$res = $plcObj->read($items1);
+		if ($plcObj == null) {
+			$plcObj = Plc::create($plcConf["addr"]);
 		}
-		else {
-			$res = Plc::readPlc($plcConf["addr"], $items1);
+		$res = $plcObj->read($items1);
+		if ($res === false) {
+			$error = $plcObj->error;
+			jdRet(E_EXT, "fail to read plc: $error", "读数据失败");
 		}
-		if ($res === false)
-			jdRet(E_EXT, "fail to read plc", "读数据失败");
 		$ret = array_combine($items, $res);
 		return $ret;
 	}
@@ -89,14 +89,14 @@ class AC_Plc extends JDApiBase
 			if (!$found)
 				jdRet(E_PARAM, "unknown plc item: $plcCode.$itemCode");
 		}
-		if ($plcObj) {
-			$res = $plcObj->write($items1);
+		if ($plcObj == null) {
+			$plcObj = Plc::create($plcConf["addr"]);
 		}
-		else {
-			$res = Plc::writePlc($plcConf["addr"], $items1);
+		$res = $plcObj->write($items1);
+		if ($res === false) {
+			$error = $plcObj->error;
+			jdRet(E_EXT, "fail to write plc: $error", "写数据失败");
 		}
-		if ($res === false)
-			jdRet(E_EXT, "fail to write plc", "写数据失败");
 	}
 
 	static protected function handleWatchItems($plcConf, $watchItems) {
@@ -164,7 +164,8 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_test() {
-		$rv = S7Plc::readPlc("127.0.0.1", ["DB21.0:int32", "DB21.4:float"], $error);
+		//$rv = Plc::readPlc("127.0.0.1", ["DB21.0:int32", "DB21.4:float"], $error);
+		$rv = Plc::writePlc("127.0.0.1", [["DB21.0:int32", 90000], ["DB21.4:float", 3.14]], $error);
 		if ($rv === false)
 			jdRet(E_EXT, $error);
 		return $rv;
@@ -182,14 +183,20 @@ class Plc
 		jdRet(E_PARAM, "unknonw plc addr type: `{$rv['schema']}`", "PLC地址错误: $addr"); 
 	}
 
-	static function readPlc($addr, $items) {
+	static function readPlc($addr, $items, &$error) {
 		$plc = self::create($addr);
-		return $plc->read($items);
+		$rv = $plc->read($items);
+		if ($rv === false)
+			$error = $plc->error;
+		return $rv;
 	}
 
-	static function writePlc($addr, $items) {
+	static function writePlc($addr, $items, &$error) {
 		$plc = self::create($addr);
-		$plc->write($items);
+		$rv = $plc->write($items);
+		if ($rv === false)
+			$error = $plc->error;
+		return $rv;
 	}
 
 	static function watchPlc($addr, $items, $cb) {
