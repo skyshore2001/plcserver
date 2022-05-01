@@ -3,53 +3,129 @@
  "addr":"s7://127.0.0.1",
  "items": {
   "byteVal": {
+   "addr": "DB21.0:uint8"
+  },
+  "uint8Val": {
+   "addr": "DB21.0:uint8"
+  },
+  "int8Val": {
    "addr": "DB21.0:int8"
   },
-  "intVal": {
-   "addr": "DB21.2:int16",
-   "watch1": [ "bitVal", "bitVal2", "floatVal", "dintVal" ]
+
+  "wordVal": {
+   "addr": "DB21.2:uint16",
+   "Xwatch": [ "bitVal", "bitVal2", "floatVal", "dintVal" ]
   },
+  "uint16Val": {
+   "addr": "DB21.2:uint16"
+  },
+  "intVal": {
+   "addr": "DB21.2:int16"
+  },
+  "int16Val": {
+   "addr": "DB21.2:int16"
+  },
+
   "dintVal": {
    "addr": "DB21.4:int32"
   },
+  "int32Val": {
+   "addr": "DB21.4:int32"
+  },
+  "dwordVal": {
+   "addr": "DB21.4:uint32"
+  },
+  "uint32Val": {
+   "addr": "DB21.4:uint32"
+  },
+
+  "byteArr": {
+   "addr": "DB21.0:uint8[4]"
+  },
+  "wordArr": {
+   "addr": "DB21.0:uint16[4]"
+  },
+
   "floatVal": {
    "addr": "DB21.8:float"
   },
+
   "bitVal": {
-   "addr": "DB21.8.0:bit"
+   "addr": "DB21.0.0:bit"
   },
   "bitVal2": {
-   "addr": "DB21.8.1:bit"
+   "addr": "DB21.0.1:bit"
+  },
+
+  "bitArr": {
+   "addr": "DB21.0.0:bit[2]"
   }
  },
- "notifyUrl1": "http://localhost/tighten/api/datachange",
  "notifyUrl": "http://oliveche.com/echo.php"
 },
 "plc2": {
- "disabled": true,
- "addr":"s7://localhost",
- "addr-1":"modbus://localhost",
+ "disabled": false,
+ "addr":"modbus://localhost",
  "items": {
-  "task1Id": {
-   "addr": "holding-register:1:DINT",
-   "dscr": "task1Id",
-   "type": "int32",
-   "watch": [ "result" ]
+  "byteVal": {
+   "addr": "S1.0:byte"
   },
-  "sn": {
-   "addr":"holding-register:5:WSTRING"
+  "uint8Val": {
+   "addr": "S1.0:uint8"
   },
-  "device": {
-   "addr":"holding-register:9:STRING"
+  "int8Val": {
+   "addr": "S1.0:int8"
   },
-  "job": {
-   "addr":"holding-register:3:REAL"
+
+  "wordVal": {
+   "addr": "S1.1:uint16",
+   "Xwatch": [ "bitVal", "bitArr", "floatVal", "intVal", "wordArr" ]
   },
-  "result": {
-   "addr":"holding-register:11:INT"
+  "uint16Val": {
+   "addr": "S1.1:uint16"
+  },
+  "intVal": {
+   "addr": "S1.1:int16"
+  },
+  "int16Val": {
+   "addr": "S1.1:int16"
+  },
+
+  "dintVal": {
+   "addr": "S1.2:int32"
+  },
+  "int32Val": {
+   "addr": "S1.2:int32"
+  },
+  "dwordVal": {
+   "addr": "S1.2:uint32"
+  },
+  "uint32Val": {
+   "addr": "S1.2:uint32"
+  },
+
+  "byteArr": {
+   "addr": "S1.0:uint8[4]"
+  },
+  "wordArr": {
+   "addr": "S1.0:uint16[4]"
+  },
+
+  "floatVal": {
+   "addr": "S1.4:float"
+  },
+
+  "bitVal": {
+   "addr": "S1.0:bit"
+  },
+  "bitVal2": {
+   "addr": "S1.1:bit"
+  },
+
+  "bitArr": {
+   "addr": "S1.0:bit[2]"
   }
  },
- "notifyUrl1": "http://localhost/tighten/api/datachange",
  "notifyUrl": "http://oliveche.com/echo.php"
 }
 }

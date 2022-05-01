@@ -176,6 +176,10 @@ class Plc
 			$addr1 = str_replace('s7://', '', $addr);
 			return new S7Plc($addr1);
 		}
+		else if ($rv['scheme'] == 'modbus') {
+			$addr1 = str_replace('modbus://', '', $addr);
+			return new ModbusClient($addr1);
+		}
 		jdRet(E_PARAM, "unknonw plc addr type: `{$rv['schema']}`", "PLC地址错误: $addr"); 
 	}
 

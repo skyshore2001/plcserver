@@ -2,7 +2,7 @@
 
 /*
 @class S7Plc
-@author liangjian
+@author liangjian <liangjian@oliveche.com>
 
 Usage (level 1): read/write once (short connection)
 
