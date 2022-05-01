@@ -3,15 +3,12 @@
 class AC_Plc extends JDApiBase
 {
 	function api_read() {
-		$confStr = file_get_contents("plc.json");
-		$conf = jsonDecode($confStr);
-		if (!$conf)
-			jdRet(E_SERVER, "bad conf plc.json");
 		$plcCode = mparam("code");
 		$items = explode(',', mparam("items"));
 		if (count($items) == 0)
 			return;
 
+		$conf = self::loadPlcConf();
 		$found = false;
 		foreach ($conf as $plcCode0 => $plcConf) {
 			if ($plcCode0 == $plcCode) {
@@ -27,16 +24,28 @@ class AC_Plc extends JDApiBase
 		return self::readItems($plcConf, $items);
 	}
 
-	function api_write() {
+	static protected function loadPlcConf() {
 		$confStr = file_get_contents("plc.json");
+		if (! $confStr)
+			return [];
 		$conf = jsonDecode($confStr);
 		if (!$conf)
 			jdRet(E_SERVER, "bad conf plc.json");
+		// auto add 'code' field
+		foreach ($conf as $code => &$plcConf) {
+			$plcConf["code"] = $code;
+		}
+		unset($plcConf);
+		return $conf;
+	}
+
+	function api_write() {
 		$plcCode = mparam("code");
 		$items = $this->env->_POST;
 		if (count($items) == 0)
 			return;
 
+		$conf = self::loadPlcConf();
 		$found = false;
 		foreach ($conf as $plcCode0 => $plcConf) {
 			if ($plcCode0 == $plcCode) {
@@ -63,7 +72,7 @@ class AC_Plc extends JDApiBase
 				}
 			}
 			if (!$found)
-				jdRet(E_PARAM, "unknown plc item: $plcCode.$itemCode");
+				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
 			$plcObj = Plc::create($plcConf["addr"]);
@@ -84,7 +93,7 @@ class AC_Plc extends JDApiBase
 				}
 			}
 			if (!$found)
-				jdRet(E_PARAM, "unknown plc item: $plcCode.$itemCode");
+				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
 			$plcObj = Plc::create($plcConf["addr"]);
@@ -131,11 +140,7 @@ class AC_Plc extends JDApiBase
 	}
 
 	static function init() {
-		$confStr = file_get_contents("plc.json");
-		$conf = jsonDecode($confStr);
-		if (!$conf)
-			jdRet(E_SERVER, "bad conf plc.json");
-
+		$conf = self::loadPlcConf();
 		foreach ($conf as $plcCode => $plcConf) {
 			if ($plcConf['disabled'])
 				continue;
