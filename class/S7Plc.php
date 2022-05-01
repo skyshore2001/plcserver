@@ -74,7 +74,7 @@ class S7Plc
 		"dint" => "int32"
 	];
 	static protected $typeMap = [
-		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
+		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLChar=0x03; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
 		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
 		"bit" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x03],
 		"int8" => ["fmt"=>"c", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
@@ -87,7 +87,7 @@ class S7Plc
 		"uint32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
 
 		"float" => ["fmt"=>"f", "len"=>4, "WordLen"=>0x08, "TransportSize"=>0x07],
-		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x09]
+		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x03, "TransportSize"=>0x09]
 		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
 		// "string[]"
 	];
@@ -425,10 +425,14 @@ class S7Plc
 
 		if ($value !== null) {
 			if ($item1["amount"] > 1) {
-				if (! is_array($value))
-					jdRet("require array value for $itemAddr");
-				if (count($value) != $item1["amount"])
-					jdRet("bad array amount for $itemAddr");
+				if (! is_array($value)) {
+					$error = "require array value for $itemAddr";
+					throw new S7PlcException($error);
+				}
+				if (count($value) != $item1["amount"]) {
+					$error = "bad array amount for $itemAddr";
+					throw new S7PlcException($error);
+				}
 				if ($item1["type"] == "bit") {
 					foreach($value as &$v) {
 						$v = $v ? 1: 0;

@@ -31,6 +31,15 @@ type:
 - bit/bool
 - float
 
+handle char:
+
+	php plc-access.php DB21.0:char[4]=A,B,,C
+	php plc-access.php DB21.0:char[4]
+	"AB\u0000C"
+
+	php plc-access.php DB21.0:uint32 -x
+	"x41420043"
+
 */
 
 require("jdcloud-php/common.php");
