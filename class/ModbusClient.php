@@ -4,6 +4,18 @@
 @class ModbusClient
 
 @auther liangjian <liangjian@oliveche.com>
+
+fail code:
+
+        0x01 => "ILLEGAL FUNCTION",
+        0x02 => "ILLEGAL DATA ADDRESS",
+        0x03 => "ILLEGAL DATA VALUE",
+        0x04 => "SLAVE DEVICE FAILURE",
+        0x05 => "ACKNOWLEDGE",
+        0x06 => "SLAVE DEVICE BUSY",
+        0x08 => "MEMORY PARITY ERROR",
+        0x0A => "GATEWAY PATH UNAVAILABLE",
+        0x0B => "GATEWAY TARGET DEVICE FAILED TO RESPOND");
 */
 
 class ModbusException extends LogicException 
@@ -24,7 +36,8 @@ class ModbusClient
 		"dint" => "int32"
 	];
 	static protected $typeMap = [
-		"bit" => ["fmt"=>"C", "len"=>1],
+		// len: 字节数
+		"bit" => ["fmt"=>"C", "len"=>0.125],
 		"int8" => ["fmt"=>"C", "len"=>1],
 		"uint8" => ["fmt"=>"C", "len"=>1],
 
@@ -78,19 +91,36 @@ class ModbusClient
 			$res = $this->req($readPacket, $pos);
 			$byteCnt = unpack("C", $res[$pos])[1];
 			++ $pos;
-			$expectedCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
+			if ($item["type"] != "bit") {
+				$expectedCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
+				if ($expectedCnt % 2 != 0)
+					++ $expectedCnt;
+			}
+			else {
+				$expectedCnt = ceil($item["amount"] / 8);
+			}
 			if ($expectedCnt != $byteCnt) {
 				$error = "item `$addr`: wrong response byte count: expect $expectedCnt, actual $byteCnt";
 				throw new ModbusException($error);
 			}
 			$t = $item["type"];
 			$fmt = self::$typeMap[$t]["fmt"];
-			if ($item["amount"] == 1) {
-				$value = unpack($fmt, substr($res, $pos, $byteCnt))[1];
+			if ($item["type"] == "bit") {
+				if ($item["amount"] == 1) {
+					$value = ord($res[$pos]) & 0x1;
+				}
+				else { // bit数组
+					$value = self::unpackBits($res, $pos, $item["amount"]);
+				}
 			}
-			else { // 数组
-				$rv = unpack($fmt.$item["amount"], substr($res, $pos, $byteCnt));
-				$value = array_values($rv);
+			else {
+				if ($item["amount"] == 1) {
+					$value = unpack($fmt, substr($res, $pos, $byteCnt))[1];
+				}
+				else { // 数组
+					$rv = unpack($fmt.$item["amount"], substr($res, $pos, $byteCnt));
+					$value = array_values($rv);
+				}
 			}
 			$ret[] = $value;
 		}
@@ -121,9 +151,13 @@ class ModbusClient
 
 	// item: { slaveId, type, startAddr, amount }
 	protected function buildReadPacket($item) {
-		// TODO: bit
-		$byteCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
-		$wordCnt = (int)ceil($byteCnt / 2);
+		if ($item["type"] != "bit") {
+			$byteCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
+			$amount = (int)ceil($byteCnt / 2); // word字数
+		}
+		else {
+			$amount = $item["amount"]; // bit位数
+		}
 		$req = mypack([
 			"n", rand(0,65000), // trans id
 			"n", 0, // protocol id
@@ -131,30 +165,81 @@ class ModbusClient
 			"C", $item["slaveId"],
 			"C", $item['type'] == 'bit'? 1: 3, // FC 1:read coil, FC 3:read register
 			"n", $item["startAddr"],
-			"n", $wordCnt,
+			"n", $amount,
 		]);
 		return $req;
 	}
 
-	// items: [{ slaveId, type=int8/int16/int32/float, startAddr, amount }]
-	protected function buildWritePacket($item) {
-		// TODO: bit
-		$fmt = self::$typeMap[$item["type"]]["fmt"];
-		if ($item["amount"] > 1) { // 数组处理
-			$valuePack = '';
-			foreach ($item["value"] as $v) {
-				$valuePack .= pack($fmt, $v);
+	private static function packBits($bitArr) {
+		$i = 0;
+		$byte = 0;
+		$ret = '';
+		foreach ($bitArr as $v) {
+			$byte |= (($v & 0x1) << $i);
+			if ($i++ == 8) {
+				$ret .= pack("C", $byte);
+				$byte = 0;
+				$i = 0;
 			}
 		}
+		if ($i) {
+			$ret .= pack("C", $byte);
+		}
+		return $ret;
+	}
+	private function unpackBits($res, $pos, $bitCnt) {
+		$value = [];
+		for ($i=0,$j=8; $i<$bitCnt; ++$i,++$j) {
+			if ($j == 8) {
+				$j = 0;
+				$byte = ord($res[$pos ++]);
+			}
+			if ($byte & (0x01 << $j)) {
+				$value[] = 1;
+			}
+			else {
+				$value[] = 0;
+			}
+		}
+		return $value;
+	}
+
+	// items: [{ slaveId, type=int8/int16/int32/float, startAddr, amount, value }]
+	protected function buildWritePacket($item) {
+		if ($item["type"] == "bit") {
+			if ($item["amount"] == 1) {
+				$valuePack = pack("C", $item["value"] & 0x1);
+				$cnt = 1;
+			}
+			else { // bit数组
+				$cnt = count($item["value"]);
+				$valuePack = self::packBits($item["value"]);
+			}
+			$dataLen = strlen($valuePack);
+		}
 		else {
-			$valuePack = pack($fmt, $item["value"]);
+			$fmt = self::$typeMap[$item["type"]]["fmt"];
+			if ($item["amount"] > 1) { // 数组处理
+				$valuePack = '';
+				foreach ($item["value"] as $v) {
+					$valuePack .= pack($fmt, $v);
+				}
+			}
+			else {
+				$valuePack = pack($fmt, $item["value"]);
+			}
+			$dataLen = strlen($valuePack);
+			if ($dataLen % 2 != 0) { // 补为偶数字节
+				++ $dataLen;
+				$valuePack .= "\x00";
+			}
+			$cnt = $dataLen / 2;
 		}
 
-		$dataLen = strlen($valuePack);
 		$reqHeader = mypack([
 			"C", $item["type"]=="bit"? 15: 16, // FC 15: write coils, FC 16: write registers
 			"n", $item["startAddr"],
-			"n", $dataLen/2, // word count
+			"n", $cnt, // word count or bit count
 			"C", $dataLen // byte count
 		]);
 		$dataLen += 6;
