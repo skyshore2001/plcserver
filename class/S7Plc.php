@@ -7,6 +7,8 @@
 Usage (level 1): read/write once (short connection)
 
 	try {
+		S7Plc::writePlc("192.168.1.101", [["DB21.0:int32", 70000], ["DB21.4:float", 3.14]]);
+
 		$res = S7Plc::readPlc("192.168.1.101", ["DB21.0:int32", "DB21.4:float"]);
 		// on success $res=[ 30000, 3.14 ]
 	}
@@ -18,6 +20,7 @@ Usage (level 2): read and write in one connection (long connection)
 
 	try {
 		$plc = new S7Plc("192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
+		$plc->write([["DB21.0:int32", 70000], ["DB21.4:float", 3.14]]);
 		$res = $plc->read(["DB21.0:int32", "DB21.4:float"]);
 		// on success $res=[ 30000, 3.14 ]
 	}
@@ -62,6 +65,14 @@ class S7Plc
 	protected $addr;
 	protected $fp;
 
+	static protected $typeAlias = [
+		"bool" => "bit",
+		"byte" => "uint8",
+		"word" => "uint16",
+		"dword" => "uint32",
+		"int" => "int16",
+		"dint" => "int32"
+	];
 	static protected $typeMap = [
 		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
 		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
@@ -139,7 +150,7 @@ class S7Plc
 			]);
 			$retCode = $ResData["ReturnCode"];
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$error = "fail to read {$items[$i]}: return code=$retCode";
+				$error = "fail to read `{$items[$i]}`: return code=$retCode";
 				throw new S7PlcException($error);
 			}
 			$len = $ResData['DataLen'];
@@ -204,7 +215,7 @@ class S7Plc
 		$i = 0;
 		foreach ($data as $retCode) {
 			if ($retCode != 0xff) { // <-- 0xFF means Result OK
-				$error = "fail to write {$items[$i][0]}: return code=$retCode";
+				$error = "fail to write `{$items[$i][0]}`: return code=$retCode";
 				throw new S7PlcException($error);
 			}
 			++ $i;
@@ -385,18 +396,31 @@ class S7Plc
 			$error = "bad plc item addr: `$itemAddr`";
 			throw new S7PlcException($error);
 		}
-		if (! array_key_exists($ms["type"], self::$typeMap)) {
+		if (array_key_exists($ms["type"], self::$typeAlias)) {
+			$ms["type"] = self::$typeAlias[$ms["type"]];
+		}
+		else if (! array_key_exists($ms["type"], self::$typeMap)) {
 			$error = "unknown plc item type: `$itemAddr`";
 			throw new S7PlcException($error);
+		}
+		$bit = @$ms["bit"];
+		if ($bit !== "") {
+			if ($ms["type"] != "bit") {
+				$error = "require bit type for `$itemAddr`";
+				throw new S7PlcException($error);
+			}
+		}
+		else {
+			$bit = 0;
 		}
 
 		$item1 = [
 			"code" => $itemAddr,
 			"dbNumber"=>$ms["db"],
 			"startAddr"=>$ms["addr"],
-			"bit"=>$ms["bit"]?:0,
+			"bit"=>$bit,
 			"type"=>$ms["type"],
-			"amount" => ($ms["amount"]?:1)
+			"amount" => (@$ms["amount"]?:1)
 		];
 
 		if ($value !== null) {
