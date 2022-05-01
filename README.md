@@ -7,9 +7,46 @@
 
 jdserver的消息推送与任务调度服务保留不变。
 
+## 安装与运行
+
+安装swoole: 
+生产环境使用centos7，可使用预编译好的包：
+
+	wget https://oliveche.com/app/tool/swoole-4.8.8-php74-centos7-lj.xz
+	sudo tar -C /opt -axf swoole-4.8.8-php74-centos7-lj.xz
+	(会创建目录 /opt/php74)
+	(加个swoole链接指向php)
+	sudo ln -sf /opt/php74/bin/php /usr/bin/swoole
+
+开发环境可使用windows 10上的wsl，使用ubuntu20上的编译好的php74模块：
+
+	wget https://oliveche.com/app/tool/swoole-4.8.8-ubuntu20-php74.tgz
+	sudo tar -C /usr/lib/php/20190902 -axf swoole-4.8.8-ubuntu20-php74.tgz
+	(创建swoole.so)
+
+在/etc/php/7.4/cli/conf.d目录下创建20-swoole.ini:
+
+	extension=swoole.so
+
+测试运行：
+
+	swoole jdserver.php
+	或
+	php jdserver.php
+
+服务安装：
+
+	sudo ./plcserver.service.sh
+
+服务运行：
+
+	sudo ./plcserver.service.sh start
+	sudo ./plcserver.service.sh restart
+	(或sudo systemctl restart plcserver)
+
 ## 读、写接口
 
-提供基于HTTP的WebAPI接口。
+提供基于HTTP的WebAPI接口。使用swoole运行服务：
 
 有关消息推送和任务调度接口见jdserver文档。
 
@@ -120,4 +157,19 @@ modbus协议地址格式为：
 
 	php plc-access.php DB21.0:uint32 -x
 	"x41420043"
+
+## 本地模拟测试
+
+### s7设备模拟
+
+可以使用snap7库中提供的server程序。默认有DB21等可以使用。
+
+http://snap7.sourceforge.net/
+
+### modbus设备模拟
+
+可以使用ModbusPal程序。
+
+使用modbus模拟器进行测试：(ModbusPal.jar)
+https://plc4x.apache.org/users/getting-started/virtual-modbus.html
 
