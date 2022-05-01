@@ -66,9 +66,15 @@ class S7Plc
 		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
 		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
 		"bit" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x03],
-		"int8" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
+		"int8" => ["fmt"=>"c", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
+		"uint8" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
+
 		"int16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x05],
+		"uint16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x05],
+
 		"int32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
+		"uint32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
+
 		"float" => ["fmt"=>"f", "len"=>4, "WordLen"=>0x08, "TransportSize"=>0x07],
 		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x09]
 		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
@@ -147,7 +153,15 @@ class S7Plc
 			$value = substr($res, $pos, $len);
 			$type = $items1[$i]["type"];
 			$fmt = self::$typeMap[$type]["fmt"];
-			$value1 = unpack($fmt, $value)[1]; // TODO: use mypack
+			$value1 = unpack($fmt, $value)[1];
+			if ($type == "int16") {
+				if ($value1 > 0x8000)
+					$value1 -= 0x10000;
+			}
+			else if ($type == "int32") {
+				if ($value1 > 0x80000000)
+					$value1 -= 0x100000000;
+			}
 			$ret[] = $value1;
 
 			if ($len % 2 != 0) {
@@ -360,6 +374,10 @@ class S7Plc
 	protected function parseItem($itemAddr) {
 		if (! preg_match('/^DB(?<db>\d+) \.(?<addr>\d+) (?:\.(?<bit>\d+))? :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
 			$error = "bad plc item addr: `$itemAddr`";
+			throw new S7PlcException($error);
+		}
+		if (! array_key_exists($ms["type"], self::$typeMap)) {
+			$error = "unknown plc item type: `$itemAddr`";
 			throw new S7PlcException($error);
 		}
 		return [
