@@ -6,6 +6,10 @@
 @auther liangjian <liangjian@oliveche.com>
 */
 
+class ModbusException extends LogicException 
+{
+}
+
 class ModbusClient
 {
 	protected $addr;
@@ -20,19 +24,18 @@ class ModbusClient
 		"dint" => "int32"
 	];
 	static protected $typeMap = [
-		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
-		"bit" => ["fmt"=>"C", "len"=>1, "wordCnt"=>1],
-		"int8" => ["fmt"=>"C", "len"=>1, "wordCnt"=>0.5],
-		"uint8" => ["fmt"=>"C", "len"=>1, "wordCnt"=>0.5],
+		"bit" => ["fmt"=>"C", "len"=>1],
+		"int8" => ["fmt"=>"C", "len"=>1],
+		"uint8" => ["fmt"=>"C", "len"=>1],
 
-		"int16" => ["fmt"=>"n", "len"=>2, "wordCnt"=>1],
-		"uint16" => ["fmt"=>"n", "len"=>2, "wordCnt"=>1],
+		"int16" => ["fmt"=>"n", "len"=>2],
+		"uint16" => ["fmt"=>"n", "len"=>2],
 
-		"int32" => ["fmt"=>"N", "len"=>4, "wordCnt"=>2],
-		"uint32" => ["fmt"=>"N", "len"=>4, "wordCnt"=>2],
+		"int32" => ["fmt"=>"N", "len"=>4],
+		"uint32" => ["fmt"=>"N", "len"=>4],
 
-		"float" => ["fmt"=>"f", "len"=>4, "wordCnt"=>2],
-		"char" => ["fmt"=>"a", "len"=>1, "wordCnt"=>2]
+		"float" => ["fmt"=>"f", "len"=>4],
+		"char" => ["fmt"=>"a", "len"=>1]
 		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
 		// "string[]"
 	];
@@ -73,8 +76,23 @@ class ModbusClient
 			// item: { slaveId, type, startAddr, amount }
 			$readPacket = $this->buildReadPacket($item);
 			$res = $this->req($readPacket, $pos);
-			$byteCnt = unpack("C", $pos)[1];
-			$ret[] = substr($res, $pos+1, $byteCnt);
+			$byteCnt = unpack("C", $res[$pos])[1];
+			++ $pos;
+			$expectedCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
+			if ($expectedCnt != $byteCnt) {
+				$error = "item `$addr`: wrong response byte count: expect $expectedCnt, actual $byteCnt";
+				throw new ModbusException($error);
+			}
+			$t = $item["type"];
+			$fmt = self::$typeMap[$t]["fmt"];
+			if ($item["amount"] == 1) {
+				$value = unpack($fmt, substr($res, $pos, $byteCnt))[1];
+			}
+			else { // 数组
+				$rv = unpack($fmt.$item["amount"], substr($res, $pos, $byteCnt));
+				$value = array_values($rv);
+			}
+			$ret[] = $value;
 		}
 		return $ret;
 	}
@@ -103,6 +121,9 @@ class ModbusClient
 
 	// item: { slaveId, type, startAddr, amount }
 	protected function buildReadPacket($item) {
+		// TODO: bit
+		$byteCnt = self::$typeMap[$item["type"]]["len"] * $item["amount"];
+		$wordCnt = (int)ceil($byteCnt / 2);
 		$req = mypack([
 			"n", rand(0,65000), // trans id
 			"n", 0, // protocol id
@@ -110,7 +131,7 @@ class ModbusClient
 			"C", $item["slaveId"],
 			"C", $item['type'] == 'bit'? 1: 3, // FC 1:read coil, FC 3:read register
 			"n", $item["startAddr"],
-			"n", $item["amount"], // TODO: word count
+			"n", $wordCnt,
 		]);
 		return $req;
 	}
@@ -118,8 +139,7 @@ class ModbusClient
 	// items: [{ slaveId, type=int8/int16/int32/float, startAddr, amount }]
 	protected function buildWritePacket($item) {
 		// TODO: bit
-		$t = $item["type"];
-		$fmt = self::$typeMap[$t]["fmt"];
+		$fmt = self::$typeMap[$item["type"]]["fmt"];
 		if ($item["amount"] > 1) { // 数组处理
 			$valuePack = '';
 			foreach ($item["value"] as $v) {
@@ -168,7 +188,7 @@ class ModbusClient
 		]);
 		if (($header["fnCode"] & 0x80) != 0) {
 			$failCode = ord($res[8]);
-			$error = "reponse fail code=$failCode";
+			$error = "response fail code=$failCode";
 			throw new ModbusException($error);
 		}
 		$pos = 8;
