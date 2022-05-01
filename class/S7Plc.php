@@ -177,13 +177,7 @@ class S7Plc
 	function write($items) {
 		$items1 = [];
 		foreach ($items as $item) { // item: [addr, value]
-			$item1 = $this->parseItem($item[0]);
-			if ($item1["type"] == "bit") {
-				$item1["value"] = $item[1] ? 1: 0;
-			}
-			else {
-				$item1["value"] = $item[1];
-			}
+			$item1 = $this->parseItem($item[0], $item[1]);
 			$items1[] = $item1;
 		}
 		$writePacket = $this->buildWritePacket($items1);
@@ -264,7 +258,7 @@ class S7Plc
 		return $TPKT . $COTP . $payload;
 	}
 
-	// items: [{ dbNumber, type=int8/int16/int32/float/double, startAddr, amount }]
+	// items: [{ code, dbNumber, type=int8/int16/int32/float/double, startAddr, amount }]
 	protected function buildWritePacket($items) {
 		$itemCnt = count($items);
 		$ReqParams = mypack([
@@ -288,7 +282,16 @@ class S7Plc
 			]);
 			$ReqParams .= $ReqFunWriteItem;
 			// ReqFunWriteDataItem 值在所有WriteItem之后
-			$valuePack = pack(self::$typeMap[$t]["fmt"], $item["value"]);
+			$fmt = self::$typeMap[$t]["fmt"];
+			if ($item["amount"] > 1) { // 数组处理
+				$valuePack = '';
+				foreach ($item["value"] as $v) {
+					$valuePack .= pack($fmt, $v);
+				}
+			}
+			else {
+				$valuePack = pack($fmt, $item["value"]);
+			}
 			$TransportSize = self::$typeMap[$t]["TransportSize"];
 			$size = $item["amount"] * self::$typeMap[$t]["len"]; // byte count
 			$len = $size;
@@ -370,8 +373,8 @@ class S7Plc
 		return $res;
 	}
 
-	// return: {dbNumber, startAddr, type, amount}
-	protected function parseItem($itemAddr) {
+	// return: {code, dbNumber, startAddr, type, amount}
+	protected function parseItem($itemAddr, $value = null) {
 		if (! preg_match('/^DB(?<db>\d+) \.(?<addr>\d+) (?:\.(?<bit>\d+))? :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
 			$error = "bad plc item addr: `$itemAddr`";
 			throw new S7PlcException($error);
@@ -380,13 +383,36 @@ class S7Plc
 			$error = "unknown plc item type: `$itemAddr`";
 			throw new S7PlcException($error);
 		}
-		return [
+
+		$item1 = [
+			"code" => $itemAddr,
 			"dbNumber"=>$ms["db"],
 			"startAddr"=>$ms["addr"],
 			"bit"=>$ms["bit"]?:0,
 			"type"=>$ms["type"],
 			"amount" => ($ms["amount"]?:1)
 		];
+
+		if ($value !== null) {
+			if ($item1["amount"] > 1) {
+				if (! is_array($value))
+					jdRet("require array value for $itemAddr");
+				if (count($value) != $item1["amount"])
+					jdRet("bad array amount for $itemAddr");
+				if ($item1["type"] == "bit") {
+					foreach($value as &$v) {
+						$v = $v ? 1: 0;
+					}
+				}
+			}
+			else {
+				if ($item1["type"] == "bit") {
+					$value = $value ? 1: 0;
+				}
+			}
+			$item1["value"] = $value;
+		}
+		return $item1;
 	}
 }
 
