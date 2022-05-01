@@ -101,11 +101,13 @@ function handleReq(&$res) {
 		foreach ($res as &$v) {
 			if (is_array($v[1])) {
 				foreach ($v[1] as &$v2) {
-					$v2 = hexdec($v2);
+					if (preg_match('/^[0-9a-f]+$/i', $v2))
+						$v2 = hexdec($v2);
 				}
 			}
 			else {
-				$v[1] = hexdec($v[1]);
+				if (preg_match('/^[0-9a-f]+$/i', $v[1]))
+					$v[1] = hexdec($v[1]);
 			}
 		}
 	}
@@ -120,7 +122,7 @@ function handleRes(&$res) {
 				handleRes($v);
 			}
 			else if (is_int($v)) {
-				$v = sprintf("x%x", $v);
+				$v = sprintf("x%02x", $v);
 			}
 		}
 	}
