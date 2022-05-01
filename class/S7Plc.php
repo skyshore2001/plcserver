@@ -153,7 +153,13 @@ class S7Plc
 			$value = substr($res, $pos, $len);
 			$type = $items1[$i]["type"];
 			$fmt = self::$typeMap[$type]["fmt"];
-			$value1 = unpack($fmt, $value)[1];
+			$amount = $items1[$i]["amount"];
+			if ($amount > 1) { // 数组
+				$value1 = array_values(unpack($fmt . $amount, $value));
+			}
+			else {
+				$value1 = unpack($fmt, $value)[1];
+			}
 			if ($type == "int16") {
 				if ($value1 > 0x8000)
 					$value1 -= 0x10000;
