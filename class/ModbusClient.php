@@ -145,10 +145,29 @@ class ModbusClient
 					$rv = unpack($fmt.$item["amount"], substr($res, $pos, $byteCnt));
 					$value = array_values($rv);
 				}
+				self::fixInt($item["type"], $value);
 			}
 			$ret[] = $value;
 		}
 		return $ret;
+	}
+
+	private static function fixInt($type, &$value) {
+		if (is_array($value)) {
+			foreach ($value as &$v) {
+				self::fixInt($type, $v);
+			}
+			unset($v);
+			return;
+		}
+		if ($type == "int16") {
+			if ($value > 0x8000)
+				$value -= 0x10000;
+		}
+		else if ($type == "int32") {
+			if ($value > 0x80000000)
+				$value -= 0x100000000;
+		}
 	}
 
 	// items: [ ["S1.0:word", 30000], ["S1.4:float", 3.14]  ]
