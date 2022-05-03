@@ -13,7 +13,7 @@ Usage (level 1): read/write once (short connection)
 		$res = ModbusClient::readPlc("192.168.1.101", ["S1.0", "S2.0:word[2]", "S3.0:float"]);
 		// on success $res=[ 70000, [30000,50000], 3.14 ]
 	}
-	catch (ModbusClientException $ex) {
+	catch (ModbusException $ex) {
 		echo($ex->getMessage());
 	}
 
@@ -22,10 +22,10 @@ Usage (level 2): read and write in one connection (long connection)
 	try {
 		$plc = new ModbusClient("192.168.1.101"); // default tcp port 502: "192.168.1.101:502"
 		$plc->write([["S1.0:dword", 70000], ["S2.0:word[2]", [30000,50000]], ["S3.0:float", 3.14]]);
-		$res = $plc->read(["S1.0", "S2.0:word[2]", "S3.0:float"]);
+		$res = $plc->read(["S1.0:dword", "S2.0:word[2]", "S3.0:float"]);
 		// on success $res=[ 70000, [30000,50000], 3.14 ]
 	}
-	catch (ModbusClientException $ex) {
+	catch (ModbusException $ex) {
 		echo($ex->getMessage());
 	}
 fail code:
@@ -285,7 +285,7 @@ class ModbusClient
 		$res = fread($fp, 4096);
 		// TODO: 包可能没收全, 应根据下面长度判断
 		if (!$res) {
-			$error = "receive null response";
+			$error = "read timeout or receive null response";
 			throw new ModbusException($error);
 		}
 		$header = myunpack(substr($res, 0, 8), [
