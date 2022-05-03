@@ -10,10 +10,10 @@ Usage (level 1): read/write once (short connection)
 		S7Plc::writePlc("192.168.1.101", [["DB21.0:int32", 70000], ["DB21.4:float", 3.14]]);
 
 		$res = S7Plc::readPlc("192.168.1.101", ["DB21.0:int32", "DB21.4:float"]);
-		// on success $res=[ 30000, 3.14 ]
+		// on success $res=[ 70000, 3.14 ]
 	}
 	catch (S7PlcException $ex) {
-		echo($ex);
+		echo($ex->getMessage());
 	}
 
 Usage (level 2): read and write in one connection (long connection)
@@ -22,10 +22,10 @@ Usage (level 2): read and write in one connection (long connection)
 		$plc = new S7Plc("192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
 		$plc->write([["DB21.0:int32", 70000], ["DB21.4:float", 3.14]]);
 		$res = $plc->read(["DB21.0:int32", "DB21.4:float"]);
-		// on success $res=[ 30000, 3.14 ]
+		// on success $res=[ 70000, 3.14 ]
 	}
 	catch (S7PlcException $ex) {
-		echo($ex);
+		echo($ex->getMessage());
 	}
 
 Read Request/Response Packet:
@@ -108,11 +108,12 @@ class S7Plc
 			$addr = $this->addr;
 			if (strpos($addr, ':') === false)
 				$addr .= ":102"; // default s7 port
-			$fp = fsockopen("tcp://" . $addr);
+			@$fp = fsockopen("tcp://" . $addr, null, $errno, $errstr, 3); // connect timeout=3s
 			if ($fp === false) {
-				$error = "fail to open tcp connection to `$addr`";
+				$error = "fail to open tcp connection to `$addr`, error $errno: $errstr";
 				throw new S7PlcException($error);
 			}
+			stream_set_timeout($fp, 3, 0); // read timeout=3s
 			$this->fp = $fp;
 		}
 		return $this->fp;
@@ -359,7 +360,7 @@ class S7Plc
 
 		$res = fread($fp, 4096);
 		if (!$res) {
-			$error = "receive null response";
+			$error = "read timeout or receive null response";
 			throw new S7PlcException($error);
 		}
 

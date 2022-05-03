@@ -14,7 +14,7 @@ Usage (level 1): read/write once (short connection)
 		// on success $res=[ 70000, [30000,50000], 3.14 ]
 	}
 	catch (ModbusClientException $ex) {
-		echo($ex);
+		echo($ex->getMessage());
 	}
 
 Usage (level 2): read and write in one connection (long connection)
@@ -26,7 +26,7 @@ Usage (level 2): read and write in one connection (long connection)
 		// on success $res=[ 70000, [30000,50000], 3.14 ]
 	}
 	catch (ModbusClientException $ex) {
-		echo($ex);
+		echo($ex->getMessage());
 	}
 fail code:
 
@@ -92,11 +92,12 @@ class ModbusClient
 			$addr = $this->addr;
 			if (strpos($addr, ':') === false)
 				$addr .= ":502"; // default modbus-tcp port
-			$fp = fsockopen("tcp://" . $addr);
+			@$fp = fsockopen("tcp://" . $addr, null, $errno, $errstr, 3); // connect timeout=3s
 			if ($fp === false) {
-				$error = "fail to open tcp connection to `$addr`";
+				$error = "fail to open tcp connection to `$addr`, error $errno: $errstr";
 				throw new ModbusException($error);
 			}
+			stream_set_timeout($fp, 3, 0); // read timeout=3s
 			$this->fp = $fp;
 		}
 		return $this->fp;
@@ -303,9 +304,9 @@ class ModbusClient
 		return $res;
 	}
 
-	// return: {slaveId, startAddr, bit, type, amount}
+	// return: {slaveId, startAddr, type, amount}
 	protected function parseItem($itemAddr, $value=null) {
-		if (! preg_match('/^S(?<slaveId>\d+) \.(?<addr>\d+) (?:\.(?<bit>\d+))? :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
+		if (! preg_match('/^S(?<slaveId>\d+) \.(?<addr>\d+) :(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
 			$error = "bad modbus item addr: `$itemAddr`";
 			throw new ModbusException($error);
 		}
@@ -319,7 +320,6 @@ class ModbusClient
 		$item1 = [
 			"slaveId"=>$ms["slaveId"],
 			"startAddr"=>$ms["addr"],
-			"bit"=>$ms["bit"]?:0,
 			"type"=>$ms["type"],
 			"amount" => (@$ms["amount"]?:1)
 		];
@@ -332,16 +332,6 @@ class ModbusClient
 				if (count($value) != $item1["amount"]) {
 					$error = "bad array amount for $itemAddr";
 					throw new ModbusException($error);
-				}
-				if ($item1["type"] == "bit") {
-					foreach($value as &$v) {
-						$v = $v ? 1: 0;
-					}
-				}
-			}
-			else {
-				if ($item1["type"] == "bit") {
-					$value = $value ? 1: 0;
 				}
 			}
 			$item1["value"] = $value;
