@@ -1566,7 +1566,7 @@ class DBEnv
 	function dbconn($fnConfirm = null)
 	{
 		$DBH = $this->DBH;
-		if (isset($DBH))
+		if (isset($DBH) || $this->DB === "null")
 			return $DBH;
 
 		// 未指定驱动类型，则按 mysql或sqlite 连接
