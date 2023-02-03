@@ -75,16 +75,16 @@ class S7Plc
 	];
 	static protected $typeMap = [
 		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLChar=0x03; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
-		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04, TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
+		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04(byte/word/dword), TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
 		"bit" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x03],
 		"int8" => ["fmt"=>"c", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
 		"uint8" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
 
-		"int16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x05],
-		"uint16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x05],
+		"int16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x04],
+		"uint16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x04],
 
-		"int32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
-		"uint32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x05],
+		"int32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x04],
+		"uint32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x04],
 
 		"float" => ["fmt"=>"f", "len"=>4, "WordLen"=>0x08, "TransportSize"=>0x07],
 		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x03, "TransportSize"=>0x09]
