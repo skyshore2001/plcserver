@@ -3,7 +3,7 @@
 class AC_Plc extends JDApiBase
 {
 	function api_read() {
-		$plcCode = mparam("code");
+		$plcCode = param("code");
 		$items = explode(',', mparam("items"));
 		if (count($items) == 0)
 			return;
@@ -11,6 +11,8 @@ class AC_Plc extends JDApiBase
 		$conf = self::loadPlcConf();
 		$found = false;
 		foreach ($conf as $plcCode0 => $plcConf) {
+			if ($plcCode === null)
+				$plcCode = $plcCode0;
 			if ($plcCode0 == $plcCode) {
 				if ($plcConf["disabled"])
 					jdRet(E_FORBIDDEN, "plc $plcCode is disabled");
@@ -40,7 +42,7 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_write() {
-		$plcCode = mparam("code");
+		$plcCode = param("code");
 		$items = $this->env->_POST;
 		if (count($items) == 0)
 			return;
@@ -48,6 +50,8 @@ class AC_Plc extends JDApiBase
 		$conf = self::loadPlcConf();
 		$found = false;
 		foreach ($conf as $plcCode0 => $plcConf) {
+			if ($plcCode === null)
+				$plcCode = $plcCode0;
 			if ($plcCode0 == $plcCode) {
 				if ($plcConf["disabled"])
 					jdRet(E_FORBIDDEN, "plc $plcCode is disabled");

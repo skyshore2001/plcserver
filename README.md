@@ -7,7 +7,7 @@
 
 jdserver的消息推送与任务调度服务保留不变。
 
-## 安装与运行
+## 安装
 
 安装swoole: 
 生产环境使用centos7，可使用预编译好的包：
@@ -28,13 +28,22 @@ jdserver的消息推送与任务调度服务保留不变。
 
 	extension=swoole.so
 
+## 配置与运行
+
+根据conf.user.template.php创建配置文件conf.user.php，指定数据库连接。一般使用mysql数据库。
+
+根据示例plc.example.json创建PLC各地址字段的配置文件plc.json.
+TODO: 配置工具
+
 测试运行：
 
 	swoole jdserver.php
 	或
 	php jdserver.php
 
-服务安装：
+启动后默认端口为8081，可以通过-p参数修改，如`swoole jdserver.php -p 10081`。
+
+服务安装：（若需要修改端口，可编辑下列文件，在命令行上加-p参数）
 
 	sudo ./plcserver.service.sh
 
@@ -44,6 +53,14 @@ jdserver的消息推送与任务调度服务保留不变。
 	sudo ./plcserver.service.sh restart
 	(或sudo systemctl restart plcserver)
 
+运行时可在网页中配置PLC：
+
+	http://localhost:8081/conf
+
+在网页中查看或修改字段值：
+
+	http://localhost:8081/plc
+
 ## 读、写接口
 
 提供基于HTTP的WebAPI接口。使用swoole运行服务：
@@ -52,17 +69,18 @@ jdserver的消息推送与任务调度服务保留不变。
 
 ### 读PLC
 
-	Plc.read(code, items)
+	Plc.read(code?, items)
 
 示例：
 
 	GET $conf_plcdAddr/api/Plc.read?code=plc1&items=id,job
 
 根据code和字段名，在plc.json配置文件中查找相应地址并读写。
+如果未指定code, 则取配置中第1个。
 
 ### 写PLC
 
-	Plc.write(code)(items...)
+	Plc.write(code?)(items...)
 
 给PLC下发任务，比如写plc1(某PLC编码):
 
@@ -71,24 +89,45 @@ POST $conf_plcdAddr/api/write?code=plc1
 
 {
     task1Id: 1001, // 拧紧枪任务号
-    sn: "sn1", // 电池包序列号. TODO: PLC是否需要该信息？
+    sn: "sn1", // 电池包序列号
     device: "dev1", // 拧紧枪编码
     job: 23, // 拧紧枪jobId
 }
 ```
 
+如果未指定code, 则取配置中第1个。
 经配置转换后，plcserver向转换后的地址写数据. 
 
 ### PLC数据变化监控
 
-当PLC中数据变化时（plcserver轮询PLC状态），回调指定URL，如：
+当PLC中数据变化时（plcserver轮询PLC状态），回调指定URL，配置示例：
+
+```json
+"plc1": {
+  "items": {
+    "outFlag": {
+      "addr": "DB100.0.3:bit",
+      "watch": [ "outBin" ]
+    },
+    "outBin": {
+      "addr": "DB100.20:uint16"
+    }
+  }
+  "notifyUrl": "http://localhost/jdcloud/api/Plc.notify"
+}
+```
+
+items中只要设置了watch属性，就表示该字段要监控，值一般指定为一个数组，代表回调时一起返回的字段值，空数组表示只返回当前字段本身。
+回调地址由notifyUrl指定。
+
+回调示例：
 
 ```http
-POST $baseUrl/api/notify
+POST http://localhost/jdcloud/api/Plc.notify
 
 {
-	task1Id: 1001,
-	result: 'OK'
+	"outFlag": 1,
+	"outBin": 13
 }
 ```
 
