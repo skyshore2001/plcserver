@@ -79,7 +79,7 @@ class AC_Plc extends JDApiBase
 				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
-			$plcObj = Plc::create($plcConf["addr"]);
+			$plcObj = self::create($plcConf["addr"]);
 		}
 		$res = $plcObj->read($items1);
 		$ret = array_combine($items, $res);
@@ -100,7 +100,7 @@ class AC_Plc extends JDApiBase
 				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
-			$plcObj = Plc::create($plcConf["addr"]);
+			$plcObj = self::create($plcConf["addr"]);
 		}
 		$res = $plcObj->write($items1);
 	}
@@ -116,7 +116,7 @@ class AC_Plc extends JDApiBase
 			$itemCodeList[] = $code;
 		}
 
-		Plc::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
+		self::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
 			foreach ($values as $i=>$value) {
 				$old = $oldValues[$i];
 				if ($old == null) {
@@ -166,36 +166,22 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_test() {
-		//$rv = Plc::readPlc("127.0.0.1", ["DB21.0:int32", "DB21.4:float"]);
-		$rv = Plc::writePlc("127.0.0.1", [["DB21.0:int32", 90000], ["DB21.4:float", 3.14]]);
-		return $rv;
+		$plc = self::create("127.0.0.1");
+		$rv = $plc->write([["DB21.0:int32", 90000], ["DB21.4:float", 3.14]]);
+		$plc->read(["DB21.0:int32", "DB21.4:float"]);
 	}
-}
 
-class Plc
-{
 	static function create($addr) {
 		$rv = parse_url($addr);
-		if ($rv['scheme'] == 's7') {
-			$addr1 = str_replace('s7://', '', $addr);
-			return new S7Plc($addr1);
+		$proto = ($rv['schema'] ?: "s7");
+		if (! in_array($proto, ["s7", "modbus"]))
+			jdRet(E_PARAM, "unsupported plc addr protocol: `$proto`", "PLC地址错误: $addr");
+		$addr1 = $rv["host"];
+		if ($rv["port"]) {
+			$addr1 .= ":" . $rv["port"];
 		}
-		else if ($rv['scheme'] == 'modbus') {
-			$addr1 = str_replace('modbus://', '', $addr);
-			return new ModbusClient($addr1);
-		}
-		jdRet(E_PARAM, "unknonw plc addr type: `{$rv['schema']}`", "PLC地址错误: $addr"); 
-	}
-
-	static function readPlc($addr, $items) {
-		$plc = self::create($addr);
-		return $plc->read($items);
-	}
-
-	static function writePlc($addr, $items) {
-		$plc = self::create($addr);
-		$rv = $plc->write($items);
-		return $rv;
+		$plc = PlcAccess::create($proto, $addr1);
+		return $plc;
 	}
 
 	static function watchPlc($addr, $items, $cb) {

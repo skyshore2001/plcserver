@@ -7,7 +7,7 @@ write:
 	plc-access -h 192.168.1.101 DB1.1:uint8=200
 
 write and read:
-	php plc-access.php DB21.1:uint8=ff  DB21.1.0:bit DB21.1.7:bit  -x
+	php plc-access.php DB21.1:uint8=0xff  DB21.1.0:bit DB21.1.7:bit  -x
 
 item address: 
 
@@ -58,8 +58,7 @@ modbus-tcp write and read:
 */
 
 require("jdcloud-php/common.php");
-require("class/S7Plc.php");
-require("class/ModbusClient.php");
+require("class/PlcAccess.php");
 
 if ($argc < 2) {
 	echo("Usage:
@@ -112,7 +111,9 @@ foreach ($argv as $i=>$v) {
 		$varr = explode('=', $v);
 		// handle array read/write:
 		if (stripos($varr[0], '[') !== false) {
-			$varr[1] = explode(',', $varr[1]);
+			if (! isStringType($varr[0])) {
+				$varr[1] = explode(',', $varr[1]);
+			}
 		}
 		$opt['write'][] = $varr;
 		$opt['read'][] = $varr[0];
@@ -124,61 +125,78 @@ foreach ($argv as $i=>$v) {
 
 echo("=== access plc {$opt['addr']}\n");
 try {
-	if ($opt['proto'] == 's7') {
-		$plc = new S7Plc($opt['addr']);
-	}
-	else if ($opt['proto'] == 'modbus') {
-		$plc = new ModbusClient($opt['addr']);
-	}
-	else {
-		echo("*** unknown proto {$opt['proto']}\n");
-	}
+	$plc = PlcAccess::create($opt['proto'], $opt['addr']);
 	if ($opt['write']) {
-		handleReq($opt['write']);
+		beforeWrite($opt['write']);
 		$plc->write($opt['write']);
 		echo("=== write ok\n");
 	}
 
 	if ($opt['read']) {
 		$res = $plc->read($opt['read']);
-		handleRes($res);
-		echo("=== read ok: " . jsonEncode($res, true));
+		afterRead($res);
+		echo("=== read ok: " . json_encode($res, JSON_PRETTY_PRINT));
 	}
 }
 catch (Exception $ex) {
 	echo("*** error: " . $ex->getMessage() . "\n");
 }
 
-// useHex
-function handleReq(&$res) {
-	global $opt;
-	if ($opt["useHex"]) {
-		foreach ($res as &$v) {
-			if (is_array($v[1])) {
-				foreach ($v[1] as &$v2) {
-					if (preg_match('/^[0-9a-f]+$/i', $v2))
-						$v2 = hexdec($v2);
-				}
+function isStringType($type) {
+	return preg_match('/:(char|string)/', $type);
+}
+
+// "ab\x31\x32"
+function decodeString($v) {
+	return preg_replace_callback('/\\\\x([0-9a-z]{2})/i', function ($ms) {
+		$c = hexdec($ms[1]);
+		return chr($c);
+	}, $v);
+}
+
+function encodeString($v) {
+	return preg_replace_callback('/./', function ($ms) {
+		if (ctype_print($ms[0]))
+			return $ms[0];
+		$s = dechex(ord($ms[0]));
+		return "\x" . str_pad($s, 2, "0", STR_PAD_LEFT);
+	}, $v);
+}
+
+// req: ["DB100.0:uint8", 100] or ["DB100.0:uint8[2]", [100, 101]]
+function beforeWrite(&$req) {
+	$handleOne = function ($type, &$val) {
+		if (isStringType($type)) {
+			$val = decodeString($val);
+		}
+		else if (substr($val,0,2) == "0x") {
+			$val = hexdec(substr($val,2));
+		}
+	};
+	foreach ($req as &$v) {
+		if (is_array($v[1])) {
+			foreach ($v[1] as &$v2) {
+				$handleOne($v[0], $v2);
 			}
-			else {
-				if (preg_match('/^[0-9a-f]+$/i', $v[1]))
-					$v[1] = hexdec($v[1]);
-			}
+		}
+		else {
+			$handleOne($v[0], $v[1]);
 		}
 	}
 }
 
-// useHex
-function handleRes(&$res) {
+function afterRead(&$res) {
 	global $opt;
-	if ($opt["useHex"]) {
-		foreach ($res as &$v) {
-			if (is_array($v)) {
-				handleRes($v);
-			}
-			else if (is_int($v)) {
-				$v = sprintf("x%02x", $v);
-			}
+	$useHex = $opt["useHex"];
+	foreach ($res as &$v) {
+		if (is_array($v)) {
+			afterRead($v);
+		}
+		else if (is_string($v)) {
+			$v = encodeString($v);
+		}
+		else if ($useHex && is_int($v)) {
+			$v = sprintf("0x%02x", $v);
 		}
 	}
 }

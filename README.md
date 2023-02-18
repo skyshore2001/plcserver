@@ -7,6 +7,11 @@
 
 jdserver的消息推送与任务调度服务保留不变。
 
+参考：
+
+- [jdserver](README.jdsever.md)
+- [plc-access](README.plc-access.md)
+
 ## 安装
 
 安装swoole: 
@@ -133,6 +138,8 @@ POST http://localhost/jdcloud/api/Plc.notify
 
 ## 命令行工具plc-access.php
 
+详细请参考：[plc-access](README.plc-access.md)
+
 读S7 PLC:
 
 	php plc-access.php -h 192.168.1.101 DB1.1:int8
@@ -140,10 +147,6 @@ POST http://localhost/jdcloud/api/Plc.notify
 写S7 PLC: （写后会自动读一次）
 
 	php plc-access.php -h 192.168.1.101 DB1.1:uint8=200
-
-读、写，使用16进制：
-
-	php plc-access.php DB21.1:uint8=ff  DB21.1.0:bit DB21.1.7:bit  -x
 
 s7协议地址格式为：
 
@@ -179,23 +182,30 @@ modbus协议地址格式为：
 - uint32/dword
 - bit/bool
 - float
-- char
+- char[最大长度]
+- string[最大长度]
 
 数组读写：
 
 	php plc-access.php -h 192.168.1.101 DB1.1:byte[2]=125,225
 
-字符读写：
+字符串读写：定长字符串用`char[长度]`（长度不超过256）, 变长字符串用`string[长度]`（长度不超过254）
 
-	php plc-access.php DB21.0:char[4]=A,B,,C
+	php plc-access.php DB21.0:char[4]="AB"
 	php plc-access.php DB21.0:char[4]
-	"AB\u0000C"
+	"AB\x00\x00"
 
-	php plc-access.php DB21.0:char[2]=A,B DB21.0:uint8[2]
-	"AB", [65,66]
+	php plc-access.php DB21.0:string[4]="AB"
+	php plc-access.php DB21.0:string[4]
+	"AB"
 
-	php plc-access.php DB21.0:uint32 -x
-	"x41420043"
+变长字符串string类型与西门子S7系列PLC的字符串格式兼容，它比char类型多2字节头部，分别表示总长度和实际长度。
+
+兼容C语言风格的"\x00"风格(两个16进制数字表示一个字符)，如
+
+	php plc-access.php DB21.0:char[4]="A\x00\x01B"
+	php plc-access.php DB21.0:char[4]
+	"A\x00\x01B"
 
 ## 本地模拟测试
 
