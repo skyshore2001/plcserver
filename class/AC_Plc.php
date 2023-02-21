@@ -119,7 +119,7 @@ class AC_Plc extends JDApiBase
 		self::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
 			foreach ($values as $i=>$value) {
 				$old = $oldValues[$i];
-				if ($old == null) {
+				if ($old === null) {
 					$oldValues[$i] = $value;
 				}
 				else if ($old == $value) {
