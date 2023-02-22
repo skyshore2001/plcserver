@@ -921,6 +921,8 @@ query接口子查询示例：
 		...
 	}
 
+当query接口没有指定orderby参数时，使用$defaultSort排序；例外：对分组查询未指定orderby参数时（即指定有gres参数时），是不会加默认排序的。
+
 ### 缺省输出字段列表
 
 @var AccessControl::$defaultRes (for query)指定缺省输出字段列表. 如果不指定，则为"*", 即 "t0.*" 加默认虚拟字段(指定default=true的字段)
@@ -1452,6 +1454,7 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 				$ex->internalMsg .= " (by requiredFields check)";
 				throw $ex;
 			}
+			$this->checkUniKey(param("uniKey"), param("uniKeyMode", "set"), true);
 		}
 		else { # for set, the fields can not be set null
 			$fs = array_merge($this->requiredFields, $this->requiredFields2);
@@ -1463,7 +1466,6 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 				}
 			}
 		}
-		$this->checkUniKey(param("uniKey"), param("uniKeyMode", "set"), true);
 		$this->onValidate();
 	}
 
@@ -1600,7 +1602,7 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 	final protected function getAliasVal($row, $col) {
 		return @$row[$this->aliasMap[$col] ?: $col];
 	}
-	final protected function setAliasVal($row, $col, $val) {
+	final protected function setAliasVal(&$row, $col, $val) {
 		$row[$this->aliasMap[$col] ?: $col] = $val;
 	}
 
@@ -1784,8 +1786,11 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 	// return: new field list
 	private function filterRes($res, $gres=false)
 	{
-		$cols = [];
+		$cols = []; // only for gres
 		$isAll = false;
+		$doAddRes = true;
+		if ($gres && param("gresHidden"))
+			$doAddRes = false;
 		foreach (self::splitCols($res) as $col) {
 			$alias = null;
 			$fn = null;
@@ -1803,7 +1808,7 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 				// 支持扩展的SUMIF/COUNTIF函数，'sumif(id>=100 and id<200, amount) s1, countif(id>10) c2'
 				// 重点防范: 1. 未知函数调用（字段中不可有括号）2. 变量(字符@);  比如 'select database(), user(), sleep(1), @@autocommit'这种调用
 				// CONCAT/IF这些能返回字符串的函数不建议开放。
-				if (!$gres && preg_match('/(\w+)\(([\w.\'* ,+-\/<>=]*)\)\s+(?:AS\s+)?([^,]+)/iu', $col, $ms)) {
+				if (!$gres && preg_match('/(\w+)\(([\w.\'* ,+-\/<>=:]*)\)\s+(?:AS\s+)?([^,]+)/iu', $col, $ms)) {
 					list($fn, $expr, $alias) = [strtoupper($ms[1]), $ms[2], $ms[3]];
 					if (! in_array($fn, ["COUNT", "SUM", "AVG", "MAX", "MIN", "COUNTIF", "SUMIF"]))
 						jdRet(E_FORBIDDEN, "function not allowed: `$fn`");
@@ -1821,16 +1826,31 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 						return "t0." . $col1;
 					}, $expr);
 
-					// `COUNTIF(status='RE')` => `COUNT(IF(a>1, 1, null))`
+					// `COUNTIF(status='RE')` => `COUNT(IF(status='RE', 1, null))`
+					// `COUNTIF(status='RE', sn)` => `COUNT(IF(status='RE', sn, null))`
+					// `COUNTIF(status='RE', DISTINCT sn)` => `COUNT(DISTINCT IF(status='RE', sn, null))`
 					if ($fn == "COUNTIF") {
-						$col = 'COUNT(IF(' . $expr . ',1,NULL)) ' . $alias;
+						$distinct = false;
+						$field = '1';
+						if (preg_match('/^(.+)?,\s*(distinct )?(.+)$/i', $expr, $ms)) {
+							$expr = $ms[1];
+							if ($ms[2])
+								$distinct = true;
+							$field = $ms[3];
+						}
+						if ($distinct) {
+							$col = "COUNT(DISTINCT IF($expr,$field,NULL))";
+						}
+						else {
+							$col = "COUNT(IF($expr,$field,NULL))";
+						}
 					}
 					// `SUMIF(status='RE', amount)` => `SUM(IF(status='RE', amount, 0))`
 					else if ($fn == "SUMIF") {
-						$col = 'SUM(IF(' . $expr . ', 0)) ' . $alias;
+						$col = 'SUM(IF(' . $expr . ', 0))';
 					}
 					else {
-						$col = $fn . '(' . $expr . ') ' . $alias;
+						$col = $fn . '(' . $expr . ')';
 					}
 					$this->isAggregatinQuery = true;
 				}
@@ -1846,16 +1866,20 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 			if ($alias)
 				$this->handleAlias($col, $alias);
 
-			$this->userRes[$alias ?: $col] = true;
+			if ($doAddRes) {
+				$this->userRes[$alias ?: $col] = true;
+			}
 
 			if (isset($fn)) {
-				$this->addRes($col);
+				if ($doAddRes) {
+					$this->addRes($alias? "$col $alias": $col);
+				}
 				continue;
 			}
 
 // 			if (! ctype_alnum($col))
 // 				jdRet(E_PARAM, "bad property `$col`");
-			if ($this->addVCol($col, true, $alias) === false) {
+			if ($this->addVCol($col, true, $alias, !$doAddRes) === false) {
 				if (!$gres && array_key_exists($col, $this->subobj)) {
 					$key = self::removeQuote($alias ?: $col);
 					$this->addSubobj($key, $this->subobj[$col]);
@@ -1868,10 +1892,21 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 					if (isset($alias)) {
 						$col1 .= " {$alias}";
 					}
-					$this->addRes($col1);
+					if ($doAddRes) {
+						$this->addRes($col1);
+					}
+					else if ($alias){
+						$this->addRes($col1);
+						$this->hiddenFields0[] = $alias;
+					}
 				}
 			}
-			$cols[] = $alias ?: $col;
+			if ($this->env->DBH->acceptAliasInGroupBy() && $doAddRes) {
+				$cols[] = $alias ?: $col;
+			}
+			else {
+				$cols[] = $this->vcolMap[$col]["def"] ?: $col;
+			}
 		}
 		if ($gres)
 			$this->sqlConf["gres"] = join(",", $cols);
@@ -1890,10 +1925,14 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 			}
 			$col = preg_replace_callback('/^\s*(\w+)/u', function ($ms) {
 				$col1 = $ms[1];
-				// 注意：与cond不同，orderby使用了虚拟字段，应在res中添加。而cond中是直接展开了虚拟字段。因为where条件不支持虚拟字段。
+				// 注意：orderby可以直接使用虚拟字段（须已在select子句即res参数中定义）；而where子句(cond参数)中必须展开虚拟字段；
+				// groupby在mysql中不必展开（只要在select子句中定义过即可），在mssql中则须展开。
 				// 故不用：$this->addVCol($col1, true, '-'); 但应在处理完后删除辅助字段，避免多余字段影响导出文件等场景。
-				if (isset($this->userRes[$col1]) || $this->addVCol($col1, true, null, true) !== false)
+				if (isset($this->userRes[$col1]) || $this->addVCol($col1, true, null, true) !== false) {
+					//if (! $this->env->DBH->acceptAliasInGroupBy())
+					//	return $this->vcolMap[$col1]["def"] ?: $col1;
 					return $col1;
+				}
 				return "t0." . $col1;
 			}, $col);
 			$colArr[] = $col;
@@ -1935,6 +1974,14 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 	// 内部被addRes调用。避免重复添加字段到res。
 	// 返回true/false: 是否添加到输出列表
 	private function addResInt(&$resArr, $col) {
+		// 添加t0.*时，如果前面有t0.id等，应自动删除
+		if ($col == "t0.*") {
+			foreach ($resArr as $i=>$e) {
+				if (substr($e,0,3) == "t0." && strpos($e, ' ') === false) {
+					unset($resArr[$i]);
+				}
+			}
+		}
 		$ignoreT0 = in_array("t0.*", $resArr);
 		// 如果有"t0.*"，则忽略主表字段如"t0.id"，但应避免别名字段如"t0.id orderId"被去掉
 		if ($ignoreT0 && substr($col,0,3) == "t0." && strpos($col, ' ') === false)
@@ -2203,10 +2250,14 @@ addCond用于添加查询条件，可以使用表的字段或虚拟字段(无须
 
 		$isExt = @ $vcolDef["isExt"] ? true : false;
 		if ($alias) {
-			$rv = $this->addRes($this->vcolMap[$col]["def"] . " " . $alias, false, $isExt);
+			$def0 = $this->vcolMap[$col]["def"] . " " . $alias;
+			$rv = $this->addRes($def0, false, $isExt);
 			$this->vcolMap[$alias] = $this->vcolMap[$col]; // vcol及其alias同时加入vcolMap
+			$this->vcolMap[$alias]["def0"] = $def0; // 更新def0
 		}
 		else {
+			// 用def0而非"def col"是为了与原始定义一致，避免addRes中加入重复字段
+			// 比如先引入缺省字段"s.cusId"，此后require中再引入cusId时也要用"s.cusId"，如果引入是"s.cusId cusId"就会重复
 			$rv = $this->addRes($this->vcolMap[$col]["def0"], false, $isExt);
 		}
 		if ($isHiddenField)
@@ -2315,31 +2366,39 @@ addCond用于添加查询条件，可以使用表的字段或虚拟字段(无须
 
 @key uniKey 防止重复机制/add接口支持存在则更新，不存在则添加
 
-(v6) 支持在添加时根据指定字段判断记录是否存在，若存在则更新，不存在才添加，称为uniKey机制。接口示例：
+(v6) 支持在添加时根据指定字段判断记录是否存在，若存在则更新，不存在才添加，称为uniKey机制。
+示例：添加工单，若指定code对应的工单已存在，则更新该工单
 
 	callSvr("Ordr.add", {uniKey: "code"}, $.noop, {code: "ordr1", itemId: 99});
-
-表示添加工单，若指定code已存在，则更新工单。
 
 uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，如操作物料类别与打印模板的关联表Cate_PrintTpl:
 
 	callSvr("Cate_PrintTpl.add", {uniKey: "cateId,printTplId"}, $.noop, {cateId: 101, printTplId: 999});
 
-表示添加关联，若关联已存在则忽略。（当指定要添加的字段刚好完全就是uniKey中字段时，没必要做更新操作，会直接忽略。）
+表示添加关联记录，若关联记录已存在则忽略。（当指定要添加的字段刚好完全就是uniKey中字段时，没必要做更新操作，会直接忽略。）
 
 注意：uniKey支持使用虚拟字段（如关联字段）.
 
+如果uniKey以"!"结尾，则表示**更新模式**。示例：更新工单，当记录不存在时报错：
+
+	callSvr("Ordr.add", {uniKey: "code!"}, $.noop, {code: "ordr1", itemId: 99});
+
 在uniKey匹配时，默认处理是更新操作，可以通过`uniKeyMode`参数来定制行为：
 
-- set: 转为更新操作（如果要更新的字段刚好就是uniKey字段，则忽略更新），接口最终返回已存在记录的id。
-- error: 报错：已存在重复记录。
-- ignore: 忽略添加操作，接口直接返回已存在记录的id。
+- set: （默认）转为更新操作（如果要更新的字段刚好就是uniKey字段，则忽略更新），接口最终返回已存在记录的id。
+- error: 如果已存在记录，则报错。在更新模式下等同于set，即记录不存在时报错。
+- ignore: 忽略添加操作，接口直接返回已存在记录的id。在更新模式下，不添加，也不报错，以-1值返回记录id。
 
 示例：添加工单，如果code已存在则报错，不允许添加
 
 	callSvr("Ordr.add", {uniKey:"code", uniKeyMode:"error"}, $.noop, {code:"4500000088", itemId: 1, qty: 100});
 
-事实上set接口也会检查uniKey参数，若发现记录有重复会报错（uniKeyMode参数只影响add接口, 对set接口无效）。
+示例：更新工单，当记录不存在时返回-1，不报错：
+
+	callSvr("Ordr.add", {uniKey: "code!", uniKeyMode:"ignore"}, $.noop, {code: "ordr1", itemId: 99});
+
+注意：尽管add接口可通过uniKey实现更新模式，但set接口是不支持uniKey的。
+通过导入实现**批量更新**应使用batchAdd；一般地通过条件进行批量更新使用batchSet/setIf接口。
 
 以上示例是将记录的控制权交给接口调用方的（如前端或后端内部接口调用callSvcInt等）；如果要在后端对象内控制重复记录行为，请参考
 @see AccessControl::checkUniKey
@@ -2372,13 +2431,15 @@ uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，�
 		return $ret;
 	}
 
-/*
-@fn AccessControl::checkUniKey($uniKey, $handler, $required=false)
+/**
+@fn AccessControl::checkUniKey($uniKey, $handler="error", $required=false)
 
 后端检查uniKey用于防止重复：
 
 - 添加时，如果根据uniKey匹配的记录已存在，则做更新处理（或报错不许重复设置）；
-- 更新时，如果根据uniKey匹配的记录已存在（且非当前记录），则报错不许设置。
+- 更新时，如果根据uniKey匹配的记录已存在，则报错不许设置（或忽略不设置）。
+
+该函数只对add/set接口有效，一般用在onValidate回调中。
 
 @param handler 添加时遇到重复记录的处理方式，可指定为以下字符串值
 
@@ -2386,13 +2447,15 @@ uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，�
 - error: 报错：已存在重复记录。
 - ignore: 忽略添加操作，接口直接返回已存在记录的id。
 
-@param required 如果设置为true，则该字段添加时不可为空
+handler参数只用于add接口; set接口遇到重复均报错处理.
+
+@param required 如果设置为true，则该字段添加时不可为空。只对add接口有效，set接口忽略该参数。
 
 用法示例：
 
 	function onValidate()
 	{
-		// code字段不允许重复, 添加时若发现该记录已存在则报错("error")，但该字段可以为空。
+		// code字段不允许重复, 添加或更新(add/set)时若发现该记录已存在则报错("error")，但该字段可以为空。
 		$this->checkUniKey("code", "error");
 
 		// uniKey支持多字段：
@@ -2400,12 +2463,23 @@ uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，�
 		$this->checkUniKey("name,phone", "set", true);
 	}
 
+uniKey以"!"结尾为更新模式，即必须匹配到记录，否则报错，详见[uniKey]
+
 @see uniKey
 */
-	protected function checkUniKey($uniKey, $handler, $required=false)
+	protected $uniKeys = null;
+	protected function checkUniKey($uniKey, $handler="error", $required=false)
 	{
+		if ($this->ac != "add" && $this->ac != "set")
+			return;
 		if (!$uniKey)
 			return;
+
+		// 已经检查过的记录到uniKeys数组，避免对相同uniKey重复检查或handler冲突
+		if (is_array($this->uniKeys) && in_array($uniKey, $this->uniKeys))
+			return;
+		$this->uniKeys[] = $uniKey;
+
 		$forceMatch = (substr($uniKey, -1) == '!');
 		if ($forceMatch)
 			$uniKey = substr($uniKey, 0, strlen($uniKey)-1);
@@ -2428,25 +2502,39 @@ uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，�
 		}
 		if ($allNull)
 			return;
-		$param = array_merge($_GET, ["res"=>"id", "cond"=>$cond, "fmt"=>"one?"]);
+		$cond1 = $cond;
+		if ($this->ac == "set") {
+			$cond1["id<>"] = $this->id;
+		}
+		$param = array_merge($_GET, ["res"=>"id", "cond"=>$cond1, "fmt"=>"one?"]);
 		$id = $this->callSvc(null, "query", $param, $_POST);
-		if (! $id && $forceMatch)
-			jdRet(E_PARAM, "uniKey does NOT match record", "找不到匹配项: uniKey=" . join(',', $cond));
-		if (! $id || ($this->ac == "set" && $id == $this->id))
+		if ($this->ac == "set") {
+			if ($id)
+				jdRet(E_PARAM, "duplicate record (id=$id): " . urlEncodeArr($cond), "已存在重复记录: uniKey=" . join(',', $cond));
 			return;
+		}
 
-		if ($handler === "error" || $this->ac == "set")
+		if (! $id) { // 记录不存在
+			if ($forceMatch) {
+				// uniKeyMode=ignore时返回id=-1，否则报错
+				if ($handler !== "ignore")
+					jdRet(E_PARAM, "uniKey does NOT match record", "找不到匹配项: uniKey=" . join(',', $cond));
+				jdRet(0, -1); 
+			}
+			return;
+		}
+
+		// 记录存在
+		if ($handler === "error")
 			jdRet(E_PARAM, "duplicate record (id=$id): " . urlEncodeArr($cond), "已存在重复记录: uniKey=" . join(',', $cond));
 
-		if ($handler === "set") {
-			// 清空字段，避免set时再检查
+		if ($handler === "set" || $forceMatch) {
+			// 清空字段，set时不必更新这些字段, 同时可忽略set接口中对同样字段的checkUniKey检查
 			foreach ($fields as $e) {
 				unset($_POST[$e]);
 			}
 			if (count($_POST) > 0) {
 				$param = array_merge($_GET, ["id" => $id, "useStrictReadonly" => "0"]);
-				unset($param["uniKey"]);
-				unset($param["uniKeyMode"]);
 				// useStrictReadonly: 遇到readonly字段的设置直接忽略，不要报错。
 				$this->callSvc(null, "set" , $param, $_POST);
 			}
@@ -2786,7 +2874,7 @@ FROM ($sql) t0";
 		}
 
 		if ($enableTotalCnt) {
-			if (!$complexCntSql) {
+			if (!$complexCntSql && !$sqlConf["distinct"]) {
 				$cntSql = "SELECT COUNT(*) FROM $tblSql";
 				if ($condSql)
 					$cntSql .= "\nWHERE $condSql";
@@ -2799,17 +2887,26 @@ FROM ($sql) t0";
 		if ($orderSql)
 			$sql .= "\nORDER BY " . $orderSql;
 
-		if ($enablePartialQuery) {
-			$sql .= "\nLIMIT " . $pagesz;
+		if ($fmt === "outfile") {
+			// no limit
+		}
+		else if ($enablePartialQuery) {
+			$this->env->DBH->paging($sql, $pagesz);
+			//$sql .= "\nLIMIT " . $pagesz;
 		}
 		else {
 			if (! $pagekey)
 				$pagekey = 1;
-			$sql .= "\nLIMIT " . ($pagekey-1)*$pagesz . "," . $pagesz;
+			$this->env->DBH->paging($sql, $pagesz, ($pagekey-1)*$pagesz);
+			//$sql .= "\nLIMIT " . ($pagekey-1)*$pagesz . "," . $pagesz;
 		}
 
 		if ($extSqlFn) {
 			$sql = $extSqlFn($sql);
+		}
+		if ($fmt === "outfile") {
+			$this->handleExportToOutfile($sql);
+			jdRet();
 		}
 		$ret = queryAll($sql, true);
 		if ($ret === false)
@@ -2841,7 +2938,13 @@ FROM ($sql) t0";
 		$this->after($ret);
 		$pivot = param("pivot");
 		if ($pivot && count($ret) > 0) {
-			$ret = pivot($ret, $pivot, param("pivotCnt/i", 1), param("pivotSumField"), param("gres"));
+			// NOTE: 不要用param("gres")，因为它可能包含alias如"t0.source 分类". 而$this->sqlConf["gres"]是由filterRes处理后的。
+			$gres = $this->sqlConf["gres"];
+			if ($gres) {
+				// "t0.source" => "source"
+				$gres = preg_replace('/\w+\./', '', $gres);
+			}
+			$ret = pivot($ret, $pivot, param("pivotCnt/i", 1), param("pivotSumField"), $gres);
 			$fixedColCnt = count($ret[0]);
 		}
 
@@ -2951,7 +3054,7 @@ FROM ($sql) t0";
 			return $ret1;
 		}
 		else {
-			$ret = objarr2table($ret, $fixedColCnt);
+			$ret = objarr2table($ret, $fixedColCnt, array_keys($this->userRes));
 		}
 		if (isset($nextkey)) {
 			$ret["nextkey"] = $nextkey;
@@ -2994,7 +3097,17 @@ FROM ($sql) t0";
 qsearch的格式是`字段1,字符2,...:查询内容`(使用英文逗号及冒号分隔).
 上例表示在dscr或cmt字段中查找包含"张%"(匹配开头)且包含"%退款%"的记录. 它等价于前端调用：
 
-	callSvr("Ordr.query", {cond: {dscr: "~张* and ~退款", cmt: "~张* and ~退款"}})
+	callSvr("Ordr.query", {cond: {_or: 1, dscr: "~张* and ~退款", cmt: "~张* and ~退款"}})
+
+(v6.1) 可以指定各字段的匹配规则，当查询短语中没有"*"时，默认表示包含（即"abc"等价于"*abc*"）；
+如果字段以"*"结尾，表示查询"abc"时等价于"abc*"（即该字段默认匹配开头）；
+如果字段以"!"结尾，表示必须精确匹配，即查询"abc"就是"abc"，不会模糊匹配。
+
+	callSvr("Sn.query", {qsearch: "code!,name*:a001"})
+
+上例表示查询code为"a001"，或是name以"a001"开头的项，等价于调用：
+
+	callSvr("Sn.query", {cond: {_or: 1, code: "a001", name: "~a001*"}})
 
 @see getQueryCond
 */
@@ -3008,17 +3121,36 @@ qsearch的格式是`字段1,字符2,...:查询内容`(使用英文逗号及冒�
 			return;
 
 		$cond = null;
+		$fieldMap = []; // $field => $matchMode  Enum(null, '*', '!')
+		foreach ($fields as $f) {
+			$mode = null;
+			if ($f[-1] == '*' || $f[-1] == '!') {
+				$mode = $f[-1];
+				$f = substr($f, 0, -1);
+			}
+			$fieldMap[$f] = $mode;
+		}
 		foreach (preg_split('/\s+/', $q) as $q1) {
 			if (strlen($q1) == 0)
 				continue;
+			$autoMatch = true;
 			if (strpos($q1, "*") !== false) {
 				$qstr = Q(str_replace("*", "%", $q1));
-			}
-			else {
-				$qstr = Q("%$q1%");
+				$autoMatch = false;
 			}
 			$cond1 = null;
-			foreach ($fields as $f) {
+			foreach ($fieldMap as $f=>$mode) {
+				if ($autoMatch) {
+					if ($mode === '*') {
+						$qstr = Q("$q1%");
+					}
+					else if ($mode == '!') {
+						$qstr = Q($q1);
+					}
+					else {
+						$qstr = Q("%$q1%");
+					}
+				}
 				addToStr($cond1, "$f LIKE $qstr", ' OR ');
 			}
 			addToStr($cond, "($cond1)", ' AND ');
@@ -3052,8 +3184,10 @@ qsearch的格式是`字段1,字符2,...:查询内容`(使用英文逗号及冒�
 		if ($qs === null)
 			return;
 		list ($fieldStr, $q) = explode(":", $qs, 2);
-		if (!$q || !$fieldStr)
+		if (!$fieldStr)
 			jdRet(E_PARAM, "bad qsearch format");
+		if (!$q)
+			return;
 		$fields = explode(",", $fieldStr);
 		$this->qsearch($fields, $q);
 	}
@@ -3251,10 +3385,16 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 	function api_delIf()
 	{
 		$rv = $this->genCondSql();
-		$sql = $this->delField === null
-			? sprintf("DELETE t0 FROM %s WHERE %s", $rv["tblSql"], $rv["condSql"])
-			: sprintf("UPDATE %s SET t0.%s=1 WHERE %s AND t0.%s=0", $rv["tblSql"], $this->delField, $rv["condSql"], $this->delField);
-		$cnt = execOne($sql);
+		if ($this->delField === null) {
+			$sql = sprintf("DELETE t0 FROM %s WHERE %s", $rv["tblSql"], $rv["condSql"]);
+			$cnt = execOne($sql);
+		}
+		else {
+			$cond = "{$rv["condSql"]} AND {$this->delField}=0";
+			$cnt = dbUpdate($rv["tblSql"], [
+				"t0.{$this->delField}" => 1
+			], $cond);
+		}
 		return $cnt;
 	}
 
@@ -3272,14 +3412,16 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
  字段列表以逗号或空白分隔, 如"title=name - addr"与"title=name, -, addr"都可以.
 
 - uniKey: (v5.5) 唯一索引字段. 如果指定, 则以该字段查询记录是否存在, 存在则更新。例如"code", 也支持多个字段（用于关联表），如"bpId,itemId"。
- (v6) uniKey支持"!"结尾表示强制匹配，用于在批量更新时防止添加记录，如"code!"表示若code匹配则更新，不匹配则报错不添加。
-- uniKeyMode: (v6) 定制发现uniKey存在的行为，默认为更新，也可为报错或忽略。
+ (v6) uniKey支持"!"结尾称为"批量更新"模式，表示强制匹配，用于在批量更新时防止添加记录，如"code!"表示若code匹配则更新，不匹配则报错不添加。
+ uniKey和uniKeyMode参数是由add接口来支持的，uniKeyMode参数用于定制记录存在时的行为，默认为更新，也可为报错或忽略。参考[uniKey].
 
 @see uniKey
 
 ## 支持三种方式上传
 
-1. 直接在HTTP POST中传输内容，数据格式为：首行为标题行(即字段名列表)，之后为实际数据行。
+### 直接在HTTP POST中传输内容
+
+数据格式为：首行为标题行(即字段名列表)，之后为实际数据行。
 行使用"\n"分隔, 列使用"\t"或逗号分隔（后端自动判断）.
 接口为：
 
@@ -3307,7 +3449,7 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 	111	高长平	18375991001	500226198312065XXX	地址2	534
 	`, {contentType:"text/plain"});
 		
-2. 标准csv/txt文件上传：
+### 标准csv/txt文件上传
 
 上传的文件首行当作标题列，如果这一行不是后台要求的标题名称，可通过URL参数title重新定义。
 一般使用excel csv文件（编码一般为gbk），或txt文件（以"\t"分隔列）。
@@ -3341,7 +3483,8 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 
 如果要调试(php/xdebug)，可加URL参数`XDEBUG_SESSION_START=1`或Cookie中加`XDEBUG_SESSION=1`
 
-3. 传入对象数组
+### 传入对象数组
+
 格式为 {list: [...]}
 
 	var data = {
@@ -3474,7 +3617,7 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 				if ( ($ex instanceof MyException) && $ex->internalMsg != null)
 					$msg .= " (" .$ex->internalMsg. ")";
 				list($row, $n) = $st->getRowInfo();
-				jdRet(E_PARAM, (string)$ex, "第{$n}行出错(\"" . join(',', $row) . "\"): " . $msg);
+				jdRet(E_PARAM, null, "第{$n}行出错(\"" . join(',', $row) . "\"): " . $msg);
 			}
 			++ $ret["cnt"];
 			$ret["idList"][] = $id;
@@ -4004,6 +4147,23 @@ function KVtoCond($k, $v)
 			jdRet();
 	}
 
+	function handleExportToOutfile($sql) {
+		$dir = "outfile";
+		if (! is_dir($dir)) {
+			// rw for mysql user
+			jdRet(E_SERVER, "no outfile dir", "导出目录未配置");
+		}
+		global $BASE_DIR;
+		$f = date("Ymd_His") . '.txt';
+		$cmd = "$sql into outfile '$BASE_DIR/$dir/$f'";
+		logit("export to outfile: $cmd");
+		execOne($cmd);
+
+		$this->header("Content-Type", "text/plain; charset=UTF-8");
+		$this->header("Content-Disposition", "attachment;filename=$f");
+		readfile("$dir/$f");
+	}
+
 /**
 @fn AccessControl::isFileExport()
 
@@ -4126,9 +4286,13 @@ class BatchAddLogic
 */
 class BatchAddStrategy
 {
-	// 由getRow设置
+	// 由getRow设置，当前行信息
 	protected $rowIdx;
 	protected $row;
+
+	// 由getObj设置，当前对象所在行信息。由于在解析对象时会多读一行，getRowInfo优先以该值返回。
+	protected $objRowIdx;
+	protected $objRow;
 
 	protected $logic; // BatchAddLogic
 	private $rows;
@@ -4236,6 +4400,8 @@ class BatchAddStrategy
 
 	// [row, rowNum] 取当前原始行信息，常用于报错
 	function getRowInfo() {
+		if (isset($this->objRowIdx))
+			return [$this->objRow, $this->objRowIdx];
 		return [$this->row, $this->rowIdx];
 	}
 	// 比getRow层次更高，一次返回一个对象，支持子对象. 回调 handleObj(block={obj, row, rowNum})
@@ -4249,6 +4415,10 @@ class BatchAddStrategy
 
 		// for complex subobj
 		$uniKey = param("uniKey");
+		// NOTE: "!"结尾表示主表更新模式，此处用不到
+		if ($uniKey && substr($uniKey, -1) == "!") {
+			$uniKey = substr($uniKey, 0, -1);
+		}
 		$subobjFields = null; // array. 当有子对象且指定了uniKey时非空，用于将多行row组装成主对象obj交handleObj处理。
 		$uniKeyFields = null; // array. 在组装主对象时，当本行关键字段与上一行相同或为空时，表示与上一行是同一对象。
 		$lastKey = null;  // 根据uniKeyFields生成，用于确认当前行否是新的对象，还是从属于上一对象
@@ -4281,6 +4451,8 @@ class BatchAddStrategy
 		}, function (&$obj, $lineObj) use (&$subobjFields) { // makeBlock
 			if ($subobjFields === null || $obj == null) {
 				$obj = $lineObj;
+				$this->objRow = $this->row;
+				$this->objRowIdx = $this->rowIdx;
 				return;
 			}
 			// lineObj组装成主对象obj

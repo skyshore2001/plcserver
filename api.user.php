@@ -35,35 +35,12 @@ function api_stat($env)
 
 function api_push($env)
 {
-	global $server;
-	global $clientMap;
-
 	$app = $env->mparam("app");
-	$userSpec = $env->mparam("user");
+	$user = $env->mparam("user");
 	$msg = $env->mparam("msg");
 	if (is_array($msg))
 		$msg = jsonEncode($msg);
-
-	$n = 0;
-	$arr = explode(',', $userSpec);
-	foreach ($clientMap as $fd => $cli) {
-		foreach ($arr as $user) {
-			if ($app == $cli['app'] && fnmatch($user, $cli['user'])) {
-				++ $n;
-				if (! @$cli["isHttp"]) { // websocket client
-					$server->push($fd, $msg);
-				}
-				else { // http长轮询
-					if ($cli["tmr"]) {
-						swoole_timer_clear($cli["tmr"]);
-					}
-					$res = Swoole\Http\Response::create($fd);
-					$res->end($msg);
-				}
-			}
-		}
-	}
-	return $n;
+	return pushMsg($app, $user, $msg);
 }
 
 function api_getUsers($env)
@@ -263,10 +240,30 @@ function api_setTimeout($env)
 	return AC_Timer::setup($env->_POST);
 }
 
+function api_conf($env)
+{
+	$ret = [];
+	foreach ($env->_GET as $k => $v) {
+		if (startsWith($k, "conf_")) {
+			$GLOBALS[$k] = $v;
+			$ret[$k] = $v;
+		}
+	}
+	if ($ret)
+		writeLog("set conf: " . jsonEncode($ret));
+	return $ret;
+}
+
 class AC_Test extends JDApiBase
 {
 	function api_hello() {
 		return callSvcInt("hello");
 	}
+}
+
+// NOTE: 继承AccessControl的类不可用于生产环境，只用于单用户演示。生产环境下AC类应继承JDApiBase。
+class AC_ApiLog extends AccessControl
+{
+	protected $allowedAc = ["query", "get"];
 }
 

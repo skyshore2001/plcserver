@@ -216,7 +216,7 @@ POST传参时支持其它编码，应在Content-Type中显示指定，如下面�
 	Obj.query(gres, gcond?, ...) -> tbl(fields...)
 
 - gres: String. 分组字段。如果设置了gres字段，则res参数中每项应该带统计函数，如"sum(cnt) sum, count(id) userCnt". 
- 最终返回列为gres参数指定的列加上res参数指定的列; 如果res参数未指定，则只返回gres参数列。
+ 最终返回列为gres参数指定的列加上res参数指定的列; 如果res参数未指定，则只返回gres参数列。(v6.1) 如果指定参数gresHidden=1，gres则不会自动加到最终结果列中。
 
 - gcond: String. (jdcloud-php扩展) 分组过滤条件(对照SQL HAVING子句).
 
@@ -585,6 +585,8 @@ function getJDEnv()
 	if (is_object($env)) {
 		return $env;
 	}
+	if (!class_exists("Swoole"))
+		return null;
 	return $env[Swoole\Coroutine::getcid()];
 }
 
@@ -660,6 +662,8 @@ login接口支持不同类别的用户登录，登录成功后会设置相应的
 
 - key被相应的认证方式使用，其格式由认证方式决定，一般即直接是认证密钥。
 
+- keyfn(key): (v6.1) key和keyfn必须指定一个。与静态匹配key不同，keyfn是一个验证函数，常用于动态查询接口调用时提供的key是否在指定的表中，然后往往动态设置SESSION（见下面basic认证中的例子）。
+
 - 通过SESSION的设置，从而使得通过认证的接口请求，相当于具有系统-9999号用户的权限（即具有AUTH_EMP权限），
   意味着它可以直接调用AC2类，或是通过`checkAuth(AUTH_EMP)`的检查。
 
@@ -712,8 +716,8 @@ HTTP Basic认证，即添加HTTP头：
 
 	// class Conf (在conf.php中)
 	static $authKeys = [
-		["authType"=>"basic", "key" => "user1:1234"],
-		["authType"=>"basic", "key" => "user2:1235"], // 可以多个
+		["authType"=>"basic", "key" => "wms:1234", "SESSION" => ["empId"=>-9000], "allowedAc" => ["Item.*","*.query","*.get"]],
+		["authType"=>"basic", "key" => "mes:1235", "SESSION" => ["empId"=>-9001], "allowedAc" => ["*.query"]],  // 可以多个
 	];
 
 请求示例：
@@ -723,6 +727,29 @@ HTTP Basic认证，即添加HTTP头：
 注意：若php是基于apache fcgi方式的部署，可能无法收到认证串，可在apache中配置：
 
 	SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+
+(v6.1) 如果想动态查询数据库来验证key是否合法，可以使用**keyfn选项**来指定验证函数。示例：
+
+	static $authKeys = [
+		// 如果接口使用basic认证，则调用keyfn_appId(key)来检查key是否合法。通过验证后检查接口限制，只允许调用Task对象接口。
+		["authType"=>"basic", "keyfn" => "keyfn_appId", "allowedAc" => ["Task.*"] ],
+	];
+
+	// 验证key，返回true表示验证成功。然后可动态设置SESSION。
+	function keyfn_appId($key) {
+		list($user, $pwd) = explode(':', $key);
+		$sql = "SELECT id FROM App WHERE code=" . Q($user) . " AND secret=" . Q($pwd);
+		$appId = queryOne($sql);
+		if ($appId) {
+			// 模拟Employee身份，以便接口调用AC2系列类。为了与Employee的id区分，习惯上用负值
+			$_SESSION["empId"] = -$appId;
+			// 设置会话变量，以便在AC2类中处理
+			$_SESSION["appId"] = $appId;
+			return true;
+		}
+	}
+
+simple认证也可以使用keyfn机制。
 
 ### none: 不验证/模拟身份认证
 
@@ -783,7 +810,7 @@ function hasPerm($perms, $exPerms=null)
 					jdRet(E_SERVER, "unregistered authType `$e`", "未知认证类型`$e`");
 				if ($fn($env)) {
 					$env->exPerm = $e;
-					$env->session_destroy();  // 对于第三方认证，不保存session（即使其中模拟了管理员登录，也不会影响下次调用）
+					$env->session_destroy();  // 对于扩展认证，不保存session（即使其中模拟了管理员登录，也不会影响下次调用）
 					break;
 				}
 			}
@@ -805,10 +832,15 @@ function checkAuthKeys($key, $authType, $env)
 		assert(isset($e["authType"]), "authKey requires authType");
 		if ($authType != $e["authType"])
 			return false;
-		assert(isset($e["key"]), "authKey requires key");
+		assert(isset($e["key"]) || is_callable($e["keyfn"]), "authKey requires key or keyfn");
 
-		// support key as a fn($key)
-		$eq = is_callable($key) ? $key($e["key"]): $key == $e["key"];
+		if (isset($e["key"])) {
+			// support key as a fn($key)
+			$eq = is_callable($key) ? $key($e["key"]): $key == $e["key"];
+		}
+		else {
+			$eq = $e["keyfn"]($key);
+		}
 		if (! $eq)
 			return false;
 
@@ -991,22 +1023,44 @@ class ConfBase
 	static $enableAutoSession = true;
 
 /**
-@var ConfBase::$enableApiLog?=true
+@var ConfBase::$enableApiLog?=1
 
-设置为false可关闭ApiLog. 例：
+- 0: 不记录
+- 1: 接口进入时记录、完成时更新
+- 2: 只记出错(可在运行中再修改值)
+- 3或其它: 接口完成时记录(可在运行中再修改值)
 
-	static $enableApiLog = false;
+设置为0可关闭ApiLog. 例：
+
+	static $enableApiLog = 0;
+
+设置为2表示只在出错时记录日志，而且允许在程序中动态再改为其它值。
+例如某轮询接口Cmd.query，默认只记录错误，但若返回结果非空，也记录日志：
+
+	// class Conf
+	static function onApiInit(&$ac)
+	{
+		if ($ac == "Cmd.query") {
+			self::$enableApiLog = 2;
+		}
+	}
+
+	// 当想要记录时，直接修改：
+	Conf::$enableApiLog = 1;
+
+注意当值为1时，会在接口进入前就记录，进口完成时再更新，在接口中再动态改为0或2是无效的；
+其它值时，只会在接口完成时记录日志（这也意味着记录顺序与发生时间可能不一致），允许在接口中再动态修改值改为0或1。
  */
-	static $enableApiLog = true;
+	static $enableApiLog = 1;
 
 /**
-@var ConfBase::$enableObjLog?=true
+@var ConfBase::$enableObjLog?=1
 
-设置为false可关闭ObjLog. 例：
+设置为0可关闭ObjLog. 例：
 
-	static $enableObjLog = false;
+	static $enableObjLog = 0;
  */
-	static $enableObjLog = true;
+	static $enableObjLog = 1;
 
 /**
 @fn ConfBase::onApiInit()
@@ -1109,6 +1163,42 @@ class ConfBase
 		// ...
 	}
 	
+@key 单点登录(SSO)
+
+@alias 第三方认证
+
+通常设计为打开筋斗云前端应用时，通过传入url参数token，在初始化时调用接口`initClient{token: "xxxx"}`。
+后端Conf.onInitClient在使用token去第三方获取用户信息后，在接口返回数据中包含userInfo字段即用户信息(如userInfo字段)即可。
+例如内嵌应用:
+
+	<iframe id="ifr" src="https://myserver.com/jdcloud/web/store.html?token=test123" width="100%" height="80%"></iframe>
+
+内层应用前端处理示例：
+
+	function main()
+	{
+		...
+		WUI.initClient({token: g_args.token}); // 添加token参数
+	}
+
+后端处理示例：
+
+	// class Conf
+	static function onInitClient(&$ret)
+	{
+		$token = param("token");
+		if ($token) {
+			$_SESSION["empId"] = 1; // TO DO: 通过token从第三方获取用户信息并保存到Employee表
+			$ret["userInfo"] = callSvcInt("Employee.get");
+		}
+	}
+
+另外，通过iframe内嵌筋斗云应用时，如果内外层url不是同一个站（如y1.xx.com:8080与y2.xx.com是同站，不看端口），即跨站时，
+内层应用会出现登录后，仍是未登录状态的情况，这是因为受跨站限制，每次请求时cookie无法保持。
+解决方法只能内层应用须使用https协议，且后端server/.htaccess文件中添加SameSite配置：
+
+	header edit Set-Cookie $ ";Secure;SameSite=None"
+
  */
 	static function onInitClient(&$ret)
 	{
@@ -1159,6 +1249,7 @@ class ApiLog
 	// for batch detail (ApiLog1)
 	private $req1, $startTm1;
 	public $batchAc; // new ac for batch
+	public $updateLog; // 可定制ApiLog记录
 
 /**
 @var ApiLog::$lastId
@@ -1173,6 +1264,11 @@ e.g. 修改ApiLog要记录的ac:
 
 	ApiLog::$instance->batchAc = "async:$f";
 
+(v6.1) 可定制ApiLog记录，比如att接口中可指定
+
+	ApiLog::$instance->updateLog = ["res"=>"1.jpg", "ressz" => filesize("1.jpg")];
+
+ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200字节，出错时记录2000字节。
 */
 	static $instance;
 
@@ -1232,6 +1328,7 @@ e.g. 修改ApiLog要记录的ac:
 		return $userId;
 	}
 
+	protected $log;
 	function logBefore()
 	{
 		$env = $this->env;
@@ -1257,20 +1354,23 @@ e.g. 修改ApiLog要记录的ac:
 		$ua = $env->_SERVER("HTTP_USER_AGENT");
 		$ver = $env->clientVer;
 
-		++ $env->DBH->skipLogCnt;
-		$this->id = $env->dbInsert("ApiLog", [
+		$this->log = [
 			"tm" => date(FMT_DT),
 			"addr" => $remoteAddr,
 			"ua" => $ua,
 			"app" => $env->appName,
 			"ses" => session_id(),
 			"userId" => $this->getUserId(),
-			"ac" => $env->getAc(),
+			"ac" => $env->getAc(true),
 			"req" => dbExpr(Q($content, $env)),
 			"reqsz" => $reqsz,
 			"ver" => $ver["str"],
 			"serverRev" => $GLOBALS["SERVER_REV"]
-		]);
+		];
+		if (Conf::$enableApiLog == 1) {
+			++ $env->DBH->skipLogCnt;
+			$this->id = $env->dbInsert("ApiLog", $this->log);
+		}
 		self::$lastId = $this->id;
 		self::$instance = $this;
 // 		$logStr = "=== [" . date("Y-m-d H:i:s") . "] id={$this->logId} from=$remoteAddr ses=" . session_id() . " app=$APP user=$userId ac=$ac >>>$content<<<\n";
@@ -1282,21 +1382,39 @@ e.g. 修改ApiLog要记录的ac:
 		$env = $this->env;
 		if ($env->DBH == null)
 			return;
+		// 不记日志的情况
+		if (!$this->id && (Conf::$enableApiLog == 0 || (Conf::$enableApiLog == 2 && $ret[0] == 0)))
+			return;
 		$iv = sprintf("%.0f", (microtime(true) - $this->startTm) * 1000); // ms
 		if ($X_RET_STR == null)
 			$X_RET_STR = jsonEncode($ret, $env->TEST_MODE);
 		$logLen = $ret[0] !== 0? 2000: 200;
 		$content = $this->myVarExport($X_RET_STR, $logLen);
+		$batchAc = $this->batchAc;
+		if ($batchAc && mb_strlen($this->batchAc)>50) {
+			$batchAc = mb_substr($this->batchAc, 0, 50);
+		}
 
-		++ $env->DBH->skipLogCnt;
-		$rv = $env->dbUpdate("ApiLog", [
+		$data = [
 			"t" => $iv,
 			"retval" => $ret[0],
 			"ressz" => strlen($X_RET_STR),
 			"res" => dbExpr(Q($content, $env)),
 			"userId" => $this->userId ?: $this->getUserId(),
-			"ac" => $this->batchAc // 默认为null；对batch调用则列出详情
-		], $this->id);
+			"ac" => $batchAc ?: $this->log["ac"] // batchAc默认为null；对batch调用则列出详情
+		];
+		if ($this->updateLog)
+			$data = $this->updateLog + $data;
+
+		arrCopy($this->log, $data);
+		++ $env->DBH->skipLogCnt;
+		if ($this->id) {
+			$rv = $env->dbUpdate("ApiLog", $data, $this->id);
+		}
+		else {
+			$this->id = $env->dbInsert("ApiLog", $this->log);
+			self::$lastId = $this->id;
+		}
 // 		$logStr = "=== id={$this->logId} t={$iv} >>>$content<<<\n";
 	}
 
@@ -1809,7 +1927,7 @@ function injectSession($userId, $appType, $fn, $days=3)
 {
 	$name = $fn === false? "delSession": "injectSession";
 	if (! Conf::$enableApiLog) {
-		logit("warn: ignore $name as Conf::\$enableApiLog=false");
+		logit("warn: ignore $name as Conf::\$enableApiLog=0");
 		return false;
 	}
 	addLog("$name(userId=$userId,appType=$appType)");
@@ -1918,7 +2036,10 @@ function delSessionById($sessionIds)
 		"msg" => "验证码为1234"
 	]);
 
-未指定主机时，固定连接127.0.0.1:80，若其它端口请修改源码。
+未指定主机时，固定连接127.0.0.1:80，若其它端口可在conf.user.php中配置:
+
+	$GLOBALS["conf_httpCallAsyncPort"] = 8080;
+
 目前内部callAsync/callSvcAsync会用到它。
 
 调用其它系统可指定完整URL，支持http或https：
@@ -1932,7 +2053,7 @@ TODO: 如果给定postParams，目前content-type固定使用application/json. �
 function httpCallAsync($url, $postParams = null)
 {
 	$host = '127.0.0.1';
-	$port = 80; // 不要试图用$_SERVER["PORT"], 当用https访问时还是拿不到端口号
+	$port = $GLOBALS["conf_httpCallAsyncPort"]; // 不要试图用$_SERVER["PORT"], 当用https访问时还是拿不到端口号
 	$isSsl = false;
 	$rv = parse_url($url);
 	if (isset($rv['scheme'])) {
@@ -2420,8 +2541,18 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 	public $onAfterActions = [];
 	private $dbgInfo = [];
 
-	function getAc() {
-		return $this->ac;
+/**
+@fn env.getAc($wantBatch=false)
+
+取当前调用名。
+如果是batch调用，则返回当前子调用名。
+
+如果指定参数wantBatch=true, 则batch调用直接返回"batch"，此时可以用env.getAc1()返回子调用名。
+*/
+	function getAc($wantBatch=false) {
+		if ($wantBatch)
+			return $this->ac;
+		return $this->ac1 ?: $this->ac;
 	}
 	function getAc1() {
 		return $this->ac1;
@@ -2457,6 +2588,11 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			}
 		};
 	}
+	function __destruct() {
+		if ($this->DEBUG_LOG == 1 && $this->dbgInfo) {
+			logit($this->dbgInfo, true, "debug");
+		}
+	}
 
 	private function initRequest() {
 		if ($this->TEST_MODE)
@@ -2479,12 +2615,13 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 				$this->header('Access-Control-Allow-Methods', $val);
 			}
 		}
-		if ($this->_SERVER("REQUEST_METHOD") === "OPTIONS")
+		$method = $this->_SERVER("REQUEST_METHOD");
+		if ($method === "OPTIONS")
 			exit();
 
 		// supportJson: 支持POST为json格式
 		$ct = getContentType($this);
-		if (strstr($ct, "/json") !== false) {
+		if (strstr($ct, "/json") !== false && $method != "GET") {
 			$content = getHttpInput($this);
 			@$arr = jsonDecode($content);
 			if (!is_array($arr)) {
@@ -2499,6 +2636,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 		$ver = $GLOBALS["SERVER_REV"];
 		if ($ver)
 			$this->header("X-Daca-Server-Rev", $ver);
+		$this->header("X-Powered-By", getConf("conf_poweredBy"));
 
 		$ac = $this->param('_ac', null, "G");
 		if (! isset($ac))
@@ -2533,7 +2671,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 
 	private $doInitEnv = true;
 	// 返回[code, data, ...]
-	function callSvcSafe($ac = null, $useTrans=true, $isSubCall = false)
+	function callSvcSafe($ac = null, $useTrans=true, $isSubCall = false, $apiFn = null)
 	{
 		global $ERRINFO;
 		$ret = [0, null];
@@ -2600,7 +2738,12 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			if ($ac !== "batch") {
 				if ($useTrans && $this->DBH && ! $this->DBH->inTransaction())
 					$this->DBH->beginTransaction();
-				$ret[1] = $this->callSvcInt($ac, $this->_GET, $this->_POST, false);
+				if (! $apiFn) {
+					$ret[1] = $this->callSvcInt($ac, $this->_GET, $this->_POST, false);
+				}
+				else {
+					$ret[1] = $apiFn();
+				}
 				$ok = true;
 			}
 			else {
@@ -2619,7 +2762,9 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 		}
 		catch (MyException $e) {
 			$ret = [$e->getCode(), $e->getMessage(), $e->internalMsg];
-			$this->addLog((string)$e, 9);
+			if (!in_array($e->getCode(), [E_NOAUTH, E_AUTHFAIL])) {
+				logit("fail to call `$ac`: $e");
+			}
 		}
 		catch (PDOException $e) {
 			// SQLSTATE[23000]: Integrity constraint violation: 1451 Cannot delete or update a parent row: a foreign key constraint fails (`jdcloud`.`Obj1`, CONSTRAINT `Obj1_ibfk_1` FOREIGN KEY (`objId`) REFERENCES `Obj` (`id`))",
@@ -2628,11 +2773,11 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 				$tbl = function_exists("T")? T($ms[1]) : $ms[1]; // T: translate function
 				$ret[1] = "`$tbl`表中有数据引用了本记录";
 			}
-			$this->addLog((string)$e, 9);
+			logit("fail to call `$ac`: $e");
 		}
 		catch (Exception $e) {
 			$ret = [E_SERVER, $ERRINFO[E_SERVER], $e->getMessage()];
-			$this->addLog((string)$e, 9);
+			logit("fail to call `$ac`: $e");
 		}
 
 		try {
@@ -2650,7 +2795,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 
 		// 记录调用日志，如果是batch，只记录子调用项，不记录batch本身
 		if ($this->ac != "batch" || $isSubCall) {
-			$debugLog = getenv("P_DEBUG_LOG") ?: 0;
+			$debugLog = $this->DEBUG_LOG;
 			if ($debugLog == 1 || ($debugLog == 2 && $ret[0] != 0)) {
 				$retStr = $isUserFmt? (is_scalar($ret[1])? $ret[1]: jsonEncode($ret[1])): jsonEncode($ret);
 				$s = 'ac=' . $ac . ($this->ac1? "(in batch)": "") . ', apiLogId=' . ApiLog::$lastId . ', ret=' . $retStr . ", dbgInfo=" . jsonEncode($this->dbgInfo, true) .
@@ -2749,7 +2894,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			$this->_GET = BatchUtil::getParams($call, "get", $retVal);
 			$this->_POST = BatchUtil::getParams($call, "post", $retVal);
 
-			$this->ac1 = $this->parseRestfulUrl('/' . $call["ac"], empty($call["post"])?"GET":"POST");
+			$this->ac1 = $this->parseRestfulUrl($call["ac"], empty($call["post"])?"GET":"POST");
 			Conf::onApiInit($this->ac1);
 
 			$acList[] = $this->ac1;
@@ -2772,6 +2917,12 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			$X_RET_STR = null;
 			$this->dbgInfo = [];
 			$this->ac1 = null;
+			// 扩展认证时，每个子调用分别认证，确保allowedAc可被检查
+			$this->perms = null;
+			if ($this->exPerm) {
+				$this->_SESSION = [];
+				$this->exPerm = null;
+			}
 
 			// 接口失败，则删除非强制执行的onAfterActions
 			if ($retCode) {
@@ -2886,7 +3037,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 		if ($method === null)
 			$method = $this->_SERVER("REQUEST_METHOD");
 		if ($pathInfo[0] == '/')
-			$pathInfo = substr($pathInfo,1);
+			$pathInfo = preg_replace('/^\/+/', '', $pathInfo);
 		$ac = htmlEscape($pathInfo);
 		// POST /login  (小写开头)
 		// GET/POST /Store.add (含.)
@@ -2999,6 +3150,8 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 
 	function callSvcInt($ac, $param=null, $postParam=null, $useTmpEnv=true)
 	{
+		if ($this->doInitEnv)
+			jdRet(E_SERVER, "bad usage of callSvcInt", "callSvcInt仅限接口内调用，外部调用请用callSvc");
 		$fn = "api_$ac";
 		if (preg_match('/^([A-Z]\w*)\.([a-z]\w*)$/u', $ac, $ms)) {
 			list($tmp, $tbl, $ac1) = $ms;
@@ -3131,6 +3284,8 @@ $param或$postParam为null时，与空数组`[]`等价。
 			$msg = $ac ? "$tbl.$ac": $tbl;
 			jdRet(!hasPerm(AUTH_LOGIN)? E_NOAUTH: E_FORBIDDEN, "Operation is not allowed for current user: `$msg`");
 		}
+		if (class_exists("{$cls}_Imp"))
+			$cls .= "_Imp";
 		$acObj = new $cls;
 		if (!is_a($acObj, "JDApiBase")) {
 			jdRet(E_SERVER, "bad AC class `$cls`. MUST extend JDApiBase or AccessControl", "AC类定义错误");
@@ -3300,7 +3455,7 @@ class JDApiBase
 
 // ====== main routine {{{
 /**
-@fn callSvc($ac=null, $useTrans=true)
+@fn callSvc($ac=null, $useTrans=true, $apiFn=null)
 
 外部调用接口。返回符合筋斗云格式的数组，至少2元素，即`[0, 成功数据, 调试信息...]`或`[非0, 失败信息, 内部失败原因, 调试信息...]`
 
@@ -3320,12 +3475,26 @@ class JDApiBase
 	$_GET = ["for" => "task", "fmt" => "one"];
 	$rv = callSvc("Employee.query");
 
+如果指定apiFn，则直接以接口环境执行该函数，包括记录ApiLog、开启数据库事务、开启并保存session等（注意接口执行会设置cookie路径和名称等）、使用jdRet报错等。
+示例：在server/weixin/auth.php中，实现微信登录，因为需要记录$_SESSION["uid"]，它必须在接口环境下执行，否则后续执行将会认为未登录：
+
+	$rv = callSvc("weixinLogin", true, function () use ($isMock) {
+		$userInfo = ...;
+		$imp = LoginImpBase::getInstance();
+		return $imp->onWeixinLogin($userInfo, $rawData);
+	});
+	if ($rv[0]) {
+		logit("weixin/auth.php fails: " . jsonEncode($rv));
+		echo("fail: " . $rv[1]);
+		exit();
+	}
+
 @see callSvcInt
 */
-function callSvc($ac=null, $useTrans=true)
+function callSvc($ac=null, $useTrans=true, $apiFn=null)
 {
 	$env = getJDEnv();
-	return $env->callSvcSafe($ac, $useTrans);
+	return $env->callSvcSafe($ac, $useTrans, false, $apiFn);
 }
 
 if (!isSwoole())
@@ -3333,7 +3502,7 @@ if (!isSwoole())
 else
 	$X_APP = [];
 
-//require_once("ext.php");
+require_once("ext.php");
 // }}}
 
 // vim: set foldmethod=marker :

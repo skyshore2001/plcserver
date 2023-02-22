@@ -45,12 +45,81 @@ P_DBCRED格式为`{用户名}:{密码}`，或其base64编码后的值，如
 	或
 	P_DBCRED=Z2FubGFuOjEyMzQ=
 
-此外，P_DB还试验性地支持SQLite数据库，直接指定以".db"为扩展名的文件，以及P_DBTYPE即可，不需要P_DBCRED。例如：
+连接mysql示例(注意在php.ini中打开php_pdo_mysql扩展)，设置以下环境变量：
 
-	P_DBTYPE=sqlite
-	P_DB=../myorder.db
+	putenv("P_DBTYPE=mysql");
+	putenv("P_DB=172.12.77.221/jdcloud");
+	putenv("P_DBCRED=demo:demo123");
+
+P_DBTYPE参数可以不设置，它默认值就是mysql。
+
+连接mssql可以通过php_pdo_sqlsrv扩展+odbc驱动，也可以通过php_pdo_odbc扩展+odbc驱动, 建议前者。
+
+连接mssql示例(通过php_pdo_sqlsrv和php_sqlsrv扩展, 微软官网下载)
+https://learn.microsoft.com/en-us/sql/connect/php/installation-tutorial-linux-mac?view=sql-server-ver16
+
+	putenv("P_DBTYPE=mssql");
+	putenv("P_DB=sqlsrv:DATABASE=FNWMS; SERVER=myserver.delta.corp; Encrypt=no");
+	putenv("P_DBCRED=wms:1234");
+
+连接mssql示例(通过php_pdo_odbc扩展), linux平台:
+https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-microsoft-odbc-driver-for-sql-server?view=sql-server-ver16
+
+	setlocale(LC_ALL, "en_US.UTF-8"); // 如果写入中文乱码，试试指定locale
+	$GLOBALS["conf_mssql_useOdbc"] = true;
+	putenv("P_DBTYPE=mssql");
+	// driver名字在/etc/odbcinst.ini中查看
+	putenv("P_DB=odbc:DRIVER={ODBC Driver 18 for SQL Server}; LANGUAGE=us_english; DATABASE=FNWMS; SERVER=myserver.delta.corp; Encrypt=no");
+	putenv("P_DBCRED=wms:1234");
+
+	// windows平台odbc示例:
+	// putenv("P_DB=odbc:DRIVER=SQL Server Native Client 10.0; DATABASE=jdcloud; Trusted_Connection=Yes; SERVER=.\MSSQL2008;");
+
+	// 使用odbc的文件DSN示例（可通过系统自带的odbcad32工具创建），如：
+	// putenv("P_DB=odbc:FILEDSN=d:\db\jdcloud-mssql.dsn");
+
+对oracle数据库为最基本的DBEnv级别支持, 不支持接口框架, 示例: (需要php扩展oci8.so和pdo_oci.so)
+
+	putenv("P_DBTYPE=oracle");
+	putenv("P_DB=oci:dbname=10.30.250.131:1525/mesdzprd;charset=AL32UTF8");
+
+此外，P_DB还试验性地支持SQLite数据库，直接指定以".db"为扩展名的文件，以及P_DBTYPE即可，不需要P_DBCRED。例如：
+连接sqlite示例(注意打开php_pdo_sqlite扩展)：
+
+	putenv("P_DBTYPE=sqlite");
+	putenv("P_DB=../myorder.db");
 
 连接SQLite数据库未做严格测试，不建议使用。
+
+做性能对比测试时还支持不连数据库(当然也不会写ApiLog)，可指定：
+
+	putenv("P_DB=null");
+
+也可以直接创建DBEnv来用(调用queryOne/execOne等)，示例：
+
+	# mysql
+	$db = "mysql:host=localhost;port=3306;dbname=jt_wms";
+	$env = new DBEnv("mysql", $db, "demo", "demo123");
+
+	$rows = $env->queryAll("SELECT * FROM Employee");
+	$rowCnt = $env->queryOne("SELECT COUNT(*) FROM Employee");
+	$newId = $env->dbInsert("Employee", ["name"=>"name1"]);
+	$cnt = $env->dbUpdate("Task", ["vendorId" => $id], ["vendorId" => $id1]);
+	$cnt = $env->execOne("UPDATE Task SET vendorId=venderId+1");
+
+	# sqlite
+	$db = "sqlite:jdcloud.db";
+	$env = new DBEnv("sqlite", $db);
+
+	# mssql over odbc
+	$db = "odbc:DRIVER={SQL Server Native Client 11.0}; UID=sa; LANGUAGE=us_english; DATABASE=jdcloud; SERVER=.; PWD=ibdibd";
+	$env = new DBEnv("mssql", $db, "demo", "demo123");
+
+	# oracle
+	$db = "oci:dbname=10.30.250.131:1525/mesdzprd;charset=AL32UTF8";
+	$env = new DBEnv("oracle", $db, "demo", "demo123");
+
+如果配置了P_DEBUG_LOG=1且P_DEBUG=9，则记录SQL调用日志到debug.log
 
 ## 测试模式与调试等级
 
@@ -72,6 +141,11 @@ P_DBCRED格式为`{用户名}:{密码}`，或其base64编码后的值，如
 
 在过去测试模式用于：可直接对生产环境进行测试且不影响生产环境，即部署后，在前端指定以测试模式连接，在后端为测试模式连接专用的测试数据库，且使用专用的cookie，实现与生产模式共用代码但互不影响。
 现已废弃这种用法，应搭建专用的测试环境用于测试开发。
+
+@key _debug 前端URL参数
+
+(v6.1) 前端指定调试等级（相当于指定P_DEBUG），会同时记录debug日志（相当于后端设置P_DEBUG_LOG=1）；
+在测试模式下，调试信息会以指定等级输出到前端。
 
 @see addLog
 
@@ -111,6 +185,20 @@ PHP默认的session过期时间为1440s(24分钟)，每次在使用session时，
 
 注意：前端会记住cookie过期时间，假如后端再次改成保留10天，由于前端已记录的是7天过期，无法立即更新，只能清除cookie后再请求才能生效。
 
+## 动态修改环境配置项
+
+在程序中可动态设置部分参数，比如一般建议debug日志只记错误（环境变量P_DEBUG_LOG设置为2），若想对于对外开发的某些接口调用记录所有日志，可以改为1，如：
+
+	function api_fn1($env) {
+		$env->DEBUG_LOG = 1; // 强制记录debug日志，也可设置0强制不记录；
+		// 注意$env即全局JDEnv/DBEnv对象，在函数接口中是参数传入的，在AC类中可用$this->env来取。
+		// $env->DBG_LEVEL = 9; // 对应环境配置项P_DEBUG
+
+		// 以下不建议程序中修改
+		// $env->TEST_MODE = 0; // 对应环境配置项P_TEST_MODE
+		// $env->MOCK_MODE = 0; // 对应环境配置项P_MOCK_MODE
+	}
+
 **********************************************************/
 
 require_once("common.php");
@@ -133,6 +221,44 @@ $BASE_DIR = dirname(__DIR__);
 // 配置项默认值（可在conf.user.php中覆盖）
 $GLOBALS["conf_jdserverUrl"] = 'http://127.0.0.1/jdserver';
 
+/**
+@key conf_poweredBy ?= "jdcloud"
+
+设置HTTP头x-powered-by，用于与x-daca-server-rev一起共同决定系统版本。
+同时可隐藏默认的php标识及版本。
+
+当前端调用多个jdcloud应用接口（或有些后端接口配置了代理到其它服务）时，
+由于各jdcloud应用的版本不同， 会导致前端误判为版本已升级，从而引起前端自动刷新。 
+这时可在conf.user.php中配置conf_poweredBy，用于与其它应用区分。示例： 
+
+	$GLOBALS["conf_poweredBy"] = "wms";
+	或
+	$GLOBALS["conf_poweredBy"] = "wms@server-pc";
+
+jdcloud前端检查当x-powered-by未变化但x-daca-server-rev变化时，才会自动刷新实现实时热更新。 
+*/
+$GLOBALS["conf_poweredBy"] = "jdcloud";
+
+$GLOBALS["conf_disableSkipLog"] = false;
+
+/**
+@var conf_mssql_translateMysql = true
+
+默认为true，即应用层可以使用部分mysql语法（常用于虚拟字段定义），框架自动转换为mssql/sqlserver数据库的T-SQL语法。
+支持：
+
+- LIMIT分页: 使用TOP或OFFSET/FETCH替代. 支持"LIMIT 20" / "LIMIT 100,20"两种语法.
+- group_concat函数: 使用string_agg替代(须sqlserver 2017以上版本). 支持order by / separator子句.
+- if/ifnull函数: 使用iis/isnull替代等
+
+@var conf_mssql_useOdbc = false
+
+默认通过pdo_sqlsrv驱动连接mssql，若通过pdo_odbc连接，应设置为true
+*/
+$GLOBALS["conf_mssql_translateMysql"] = true;
+$GLOBALS["conf_mssql_useOdbc"] = false;
+
+$GLOBALS["conf_httpCallAsyncPort"] = 80;
 // }}}
 
 // load user config
@@ -506,7 +632,7 @@ function mparam($name, $col = null, $doHtmlEscape = true, $env = null)
 
 	if (isset($GLOBALS["conf_xxx"])) ...
 
-配置使用全局变量：
+如果希望用户未配置时返回缺省值，可直接先配置其缺省值（应确保在conf.user.php中可被覆盖）：
 
 	$GLOBALS["conf_jdserverUrl"] = "http://...";
 
@@ -676,7 +802,41 @@ function getRsAsTable($sql)
 }
 
 /**
-@fn objarr2table ($objarr, $fixedColCnt=null)
+@fn sortBySeq($arr, $seq)
+
+确保$arr数组中元素顺序与$seq数组中一致。
+示例：
+
+	$arr = ["id","age","name","prop"]
+	sortBySeq($arr, ["name", "age", "score"]);
+	// $arr为 ["id","name","age","prop"]
+
+注意: $seq中未指定的元素(如上例$arr中的"prop")，或是多指定的元素(如"score"在$arr中不存在)，都忽略不管，最终确保$arr中顺序与$seq不冲突即可。
+
+算法: 重新赋值$arr中在$seq指定的元素，如上例中重新赋值两个：
+
+	$arr[1]="name";
+	$arr[2]="age";
+*/
+function sortBySeq(&$arr, $seq)
+{
+	$idxArr = [];
+	$seq1 = [];
+	foreach ($seq as $e) {
+		$i = array_search($e, $arr);
+		if ($i !== false) {
+			$idxArr[] = $i;
+			$seq1[] = $e;
+		}
+	}
+	sort($idxArr);
+	foreach ($idxArr as $i) {
+		$arr[$i] = array_shift($seq1);
+	}
+}
+
+/**
+@fn objarr2table ($objarr, $fixedColCnt=null, $seq=null)
 
 将objarr格式转为table格式, 如：
 
@@ -714,10 +874,12 @@ function getRsAsTable($sql)
 			]
 		]
 
+可选参数$seq是个数组，可指定列顺序，如上例中指定$seq=`["name", "id"]`，则最终的列数组将为`["name", "id", "flag_v", "flag_r"]`。
+
 @see table2objarr
 @see varr2objarr
 */
-function objarr2table($rs, $fixedColCnt=null)
+function objarr2table($rs, $fixedColCnt=null, $seq = null)
 {
 	$h = [];
 	$d = [];
@@ -737,6 +899,11 @@ function objarr2table($rs, $fixedColCnt=null)
 			}
 		}
 	}
+	// 确保按$seq中指定的列顺序. 
+	if ($seq) {
+		sortBySeq($h, $seq);
+	}
+
 	$n = 0;
 	foreach ($rs as $row) {
 		$d[] = [];
@@ -917,6 +1084,9 @@ function Q($s, $env=null)
 		return "null";
 	if ($env === null)
 		$env = getJDEnv();
+	if ($env->DBTYPE == "mssql") {
+		return "N'" . str_replace("'", "''", $s) . "'";
+	}
 	$dbh = $env->DBH;
 	if ($dbh == null) {
 		return qstr($s, "'");
@@ -954,11 +1124,39 @@ function sql_concat()
 
 - 键值对，键为字段名，值为查询条件，使用更加直观（如字符串不用加引号），如：
 
-		["id"=>1, "status"=>"CR", "name"=>"null", "dscr"=>null, "f1"=>"", "f2"=>"empty"]
-		生成 "id=1 AND status='CR'" AND name IS NULL AND f2=''
-		注意，当值为null或空串时会忽略掉该条件，用"null"表示"IS NULL"条件，用"empty"表示空串。
+		[
+			"id"=>1,
+			"status"=>"CR",
+			"name"=>"null",
+			"dscr"=>null,
+			"f1"=>"",
+			"f2"=>"empty"
+		]
+		生成 "id=1 AND status='CR'" AND name IS NULL AND f2=''"
+		注意，当值为null或空串时会忽略掉该条件，所以dscr和f1参数没有进入条件；用字符串"null"表示"IS NULL"条件，用字符串"empty"表示空串。
 
 		可以使用符号： > < >= <= !(not) ~(like匹配)
+		[
+			"id>=" => 100, 
+			"id<=" => 200,
+			"tm>=" => "2020-1-1",
+			"tm<"  => "2021-1-1",
+			"status!"=>"CR",
+			"name~" => "wang%",
+			"dscr~" => "aaa",
+			"dscr2!~" =>"aaa"
+		]
+		生成 "id>=100 AND id<=200 AND tm>='2020-1-1" AND tm<'2021-1-1' AND status<>'CR' AND name LIKE 'wang%' AND dscr LIKE '%aaa%' AND dscr2 NOT LIKE '%aaa%'"
+		同样，如果值是null或""，则它不进入条件，如 `["id>=" => 100, "id<" => null]`生成条件为 `id>=100`
+
+		这样比较方便拼接条件，例如前端调用`callSvr("Ordr", {cond:{"createTm>=":tm1, "createTm<":tm2}})`，当tm1或tm2为空不产生条件;
+		后端也是类似，例如：
+
+			$tm1 = param("tm1");
+			$tm2 = param("tm2");
+			$cond = getQueryCond(["createTm>=" => $tm1, "createTm<"=>$tm2]); // 如果tm1或tm2为空，则不产生条件
+
+		也可以将符号放在值中（但这样则无法同一字段指定多次）：
 		["id"=>"<100", "tm"=>">2020-1-1", "status"=>"!CR", "name"=>"~wang%", "dscr"=>"~aaa", "dscr2"=>"!~aaa"]
 		生成 "id<100 AND tm>'2020-1-1" AND status<>'CR' AND name LIKE 'wang%' AND dscr LIKE '%aaa%' AND dscr2 NOT LIKE '%aaa%'"
 		like用于字符串匹配，字符串中用"%"或"*"表示通配符，如果不存在通配符，则表示包含该串(即生成'%xxx%')
@@ -1004,6 +1202,13 @@ function sql_concat()
 	callSvr("Hub.query", {res:"id", cond: {id: ">=1 AND <100"}})
 	callSvr("Hub.query", {res:"id", cond: ["id>=1", "id<100"]}, $.noop, {cond: {name:"~wang%", dscr:"~111"}})
 
+字段名支持中文，也支持带表名如`t0.xxx`的形式：
+
+	$cond = getQueryCond([
+		"t0.createTm>=" => $tm1,
+		"t0.createTm<"  => $tm2
+	]);
+
 */
 function getQueryCond($cond)
 {
@@ -1027,6 +1232,9 @@ function getQueryCond($cond)
 		}
 		else if ($k[0] == "_" || $v === null || $v === "") {
 			continue;
+		}
+		else if (preg_match('/^([.\w]+)\s*([<>=!~]+)$/u', $k, $ms)) {
+			$exp = getQueryExp($ms[1], $v, $ms[2]);
 		}
 		else {
 			// key => value, e.g. { id: ">100 AND <20", name: "~wang*", status: "CR OR PA", status2: "!CR AND !PA OR null"}
@@ -1053,7 +1261,7 @@ function getQueryCond($cond)
 }
 
 // similar to h5 getexp but not same
-function getQueryExp($k, $v)
+function getQueryExp($k, $v, $op = '=')
 {
 	// 即使纯数值最好也加引号，不容易出错，特别是对0开头或很长数字的字符串
 // 	if (is_numeric($v))
@@ -1079,7 +1287,6 @@ function getQueryExp($k, $v)
 	if ($done)
 		return $v;
 
-	$op = '=';
 	$v = preg_replace_callback('/^[><=!~]+/', function ($ms) use (&$op) {
 		if ($ms[0] == '!' || $ms[0] == '!=')
 			$op = '<>';
@@ -1347,7 +1554,7 @@ class BatchInsert
 		$verb = @$opt["useReplace"]? "REPLACE": "INSERT";
 		if (is_string($headers)) {
 			$headerStr = $headers;
-			$headers = preg_split('/\s*,/\s*/', $headerStr);
+			$headers = preg_split('/\s*,\s*/', $headerStr);
 		}
 		else {
 			$headerStr = join(',', $headers);
@@ -1432,7 +1639,7 @@ class DbExpr
 /**
 @fn dbExpr($val)
 
-用于在dbInsert/dbUpdate(插入或更新数据库)时，使用表达式：
+## 用于在dbInsert/dbUpdate(插入或更新数据库)时，使用表达式：
 
 	$id = dbInsert("Ordr", [
 		"tm" => dbExpr("now()") // 使用dbExpr直接提供SQL表达式
@@ -1457,6 +1664,16 @@ class DbExpr
 		if (issetval("cond")) {
 			$_POST["cond"] = dbExpr(Q($_POST["cond"]));
 		}
+	}
+
+## 也用于直接返回字符串数据，不经JSON编码处理，示例：
+
+	function api_test2()
+	{
+		$ret = '{"a":100, "b":[3,4]}';
+		return dbExpr($ret);
+		// 接口输出 [0, {"a":100, "b":[3,4]}]
+		// 也可以用 jdRet(0, dbExpr($ret));
 	}
 
 @see dbInsert
@@ -1522,26 +1739,53 @@ function dbUpdate($table, $kv, $cond, $noEscape=false)
 class DBEnv
 {
 	public $DBH;
-	protected $DB, $DBCRED, $DBTYPE;
+	public $DBTYPE;
+	protected $C; // [connectionString, user, pwd]
+	protected $db; // sql strategy for supported db
 
-	public $TEST_MODE, $MOCK_MODE, $DBG_LEVEL;
+	public $TEST_MODE, $MOCK_MODE, $DBG_LEVEL, $DEBUG_LOG;
 
-	function __construct() {
+	function __construct($dbtype = null, $db = null, $user = null, $pwd = null) {
+		if ($dbtype) {
+			$this->DBTYPE = $dbtype;
+			assert('$db');
+			$this->C = [$db, $user, $pwd];
+		}
+		else {
+			$this->initDbType();
+		}
 		$this->initEnv();
 	}
 
-	private function initEnv() {
+	function addLog($data, $logLevel=0) {
+		if ($this->DEBUG_LOG == 1 && $this->DBG_LEVEL >= $logLevel) {
+			logit($data, true, 'debug');
+			return true;
+		}
+	}
+	function amendLog($logHandle, $fn) {
+		$data = '';
+		$fn($data);
+		logit($data, false, 'debug');
+	}
+
+	private function initDbType() {
 		mb_internal_encoding("UTF-8");
 		setlocale(LC_ALL, "zh_CN.UTF-8");
 
 		$this->DBTYPE = getenv("P_DBTYPE");
-		$this->DB = getenv("P_DB") ?: "localhost/jdcloud";
-		$this->DBCRED = getenv("P_DBCRED") ?: "ZGVtbzpkZW1vMTIz"; // base64({user}:{pwd}), default: demo:demo123
+		$DB = getenv("P_DB") ?: "localhost/jdcloud";
+		$DBCRED = getenv("P_DBCRED") ?: "ZGVtbzpkZW1vMTIz"; // base64({user}:{pwd}), default: demo:demo123
 
+		// 未指定驱动类型，则按 mysql或sqlite 连接
 		// e.g. P_DB="../carsvc.db"
 		if (! $this->DBTYPE) {
-			if (preg_match('/\.db$/i', $this->DB)) {
+			if (preg_match('/\.db$/i', $DB)) {
 				$this->DBTYPE = "sqlite";
+			}
+			// P_DB=null: 做性能对比测试时, 指定不连数据库
+			else if ($DB === "null") {
+				$this->DBTYPE = null;
 			}
 			else {
 				$this->DBTYPE = "mysql";
@@ -1549,14 +1793,41 @@ class DBEnv
 		}
 		if ($this->DBTYPE == "sqlite") {
 			# 处理相对路径. 绝对路径：/..., \\xxx\..., c:\...
-			if ($this->DB[0] !== '/' && $this->DB[1] !== ':') {
+			if ($DB[0] !== '/' && $DB[1] !== ':') {
 				global $BASE_DIR;
-				$this->DB = $BASE_DIR . '/' . $this->DB;
+				$DB = $BASE_DIR . '/' . $DB;
 			}
 		}
 
+		// e.g. P_DB="../carsvc.db"
+		if ($this->DBTYPE == "sqlite") {
+			$DB = "sqlite:$DB";
+		}
+		else if ($this->DBTYPE == "mysql") {
+			// e.g. P_DB="115.29.199.210/carsvc"
+			// e.g. P_DB="115.29.199.210:3306/carsvc"
+			if (! preg_match('/^"?(.*?)(:(\d+))?\/(\w+)"?$/', $DB, $ms))
+				jdRet(E_SERVER, "bad db=`$DB`", "未知数据库");
+			$dbhost = $ms[1];
+			$dbport = $ms[3] ?: 3306;
+			$dbname = $ms[4];
+
+			$DB = "mysql:host={$dbhost};dbname={$dbname};port={$dbport}";
+		}
+		list($dbuser, $dbpwd) = getCred($DBCRED); 
+		$this->C = [$DB, $dbuser, $dbpwd];
+	}
+
+	private function initEnv() {
 		$this->TEST_MODE = getenv("P_TEST_MODE")===false? 0: intval(getenv("P_TEST_MODE"));
-		$this->DBG_LEVEL = getenv("P_DEBUG")===false? 0 : intval(getenv("P_DEBUG"));
+		if (isset($_GET["_debug"])) {
+			$this->DBG_LEVEL = intval($_GET["_debug"]);
+			$this->DEBUG_LOG = 1;
+		}
+		else {
+			$this->DBG_LEVEL = getenv("P_DEBUG")===false? 0 : intval(getenv("P_DEBUG"));
+			$this->DEBUG_LOG = getenv("P_DEBUG_LOG")===false? 0 : intval(getenv("P_DEBUG_LOG"));
+		}
 
 		if ($this->TEST_MODE) {
 			$this->MOCK_MODE = getenv("P_MOCK_MODE") ?: 0;
@@ -1566,40 +1837,16 @@ class DBEnv
 	function dbconn($fnConfirm = null)
 	{
 		$DBH = $this->DBH;
-		if (isset($DBH) || $this->DB === "null")
+		if (isset($DBH) || $this->DBTYPE === null)
 			return $DBH;
-
-		// 未指定驱动类型，则按 mysql或sqlite 连接
-	// 	if (! preg_match('/^\w{3,10}:/', $DB)) {
-			// e.g. P_DB="../carsvc.db"
-			if ($this->DBTYPE == "sqlite") {
-				$C = ["sqlite:" . $this->DB, '', ''];
-			}
-			else if ($this->DBTYPE == "mysql") {
-				// e.g. P_DB="115.29.199.210/carsvc"
-				// e.g. P_DB="115.29.199.210:3306/carsvc"
-				if (! preg_match('/^"?(.*?)(:(\d+))?\/(\w+)"?$/', $this->DB, $ms))
-					jdRet(E_SERVER, "bad db=`{$this->DB}`", "未知数据库");
-				$dbhost = $ms[1];
-				$dbport = $ms[3] ?: 3306;
-				$dbname = $ms[4];
-
-				list($dbuser, $dbpwd) = getCred($this->DBCRED); 
-				$C = ["mysql:host={$dbhost};dbname={$dbname};port={$dbport}", $dbuser, $dbpwd];
-			}
-	// 	}
-	// 	else {
-	// 		list($dbuser, $dbpwd) = getCred($this->DBCRED); 
-	// 		$C = [$this->DB, $dbuser, $dbpwd];
-	// 	}
 
 		if ($fnConfirm == null)
 			@$fnConfirm = $GLOBALS["dbConfirmFn"];
-		if ($fnConfirm && $fnConfirm($C[0]) === false) {
+		if ($fnConfirm && $fnConfirm($this->C[0]) === false) {
 			exit;
 		}
 		try {
-			@$DBH = new JDPDO ($C[0], $C[1], $C[2], $this);
+			@$DBH = JDPDO::create($this->C[0], $this->C[1], $this->C[2], $this->DBTYPE);
 		}
 		catch (PDOException $e) {
 			$msg = $this->TEST_MODE ? $e->getMessage() : "dbconn fails";
@@ -1607,10 +1854,6 @@ class DBEnv
 			jdRet(E_DB, $msg, "数据库连接失败");
 		}
 		
-		if ($this->DBTYPE == "mysql") {
-			++ $DBH->skipLogCnt;
-			$DBH->exec('set names utf8mb4');
-		}
 		$DBH->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION); # by default use PDO::ERRMODE_SILENT
 
 		# enable real types (works on mysql after php5.4)
@@ -1618,6 +1861,7 @@ class DBEnv
 		$DBH->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
 		$DBH->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, false);
 		$this->DBH = $DBH;
+		$DBH->initConn();
 		return $DBH;
 	}
 
@@ -1646,8 +1890,7 @@ class DBEnv
 		$DBH = $this->dbconn();
 		if ($cond)
 			$sql = genQuery($sql, $cond);
-		if (stripos($sql, "limit ") === false && stripos($sql, "for update") === false)
-			$sql .= " LIMIT 1";
+		$DBH->addLimit1($sql);
 		$sth = $DBH->query($sql);
 
 		if ($sth === false) {
@@ -1678,11 +1921,21 @@ class DBEnv
 		$fetchMode = $assoc? PDO::FETCH_ASSOC: PDO::FETCH_NUM;
 		$allRows = [];
 		do {
-			$rows = $sth->fetchAll($fetchMode);
+			try {
+				$rows = $sth->fetchAll($fetchMode);
+			}
+			catch (PDOException $ex) {
+                // NOTE: mssql (unixodbc) 执行'sp_help Cinf'时, nextRowSet未能返回false导致错误
+				// SQLSTATE[24000]: Invalid cursor state
+				// SQLSTATE[IMSSP]: The active result for the query contains no fields
+				if ($ex->getCode() == 24000 || $ex->getCode() == "IMSSP")
+					break;
+				throw $ex;
+			}
 			$DBH->amendLog("cnt=". count($rows));
 			$allRows[] = $rows;
 			// bugfix:sqlite不支持nextRowSet
-			if ($this->DBTYPE = "sqlite")
+			if ($this->DBTYPE == "sqlite")
 				break;
 		}
 		while ($sth->nextRowSet());
@@ -1776,13 +2029,18 @@ class DBEnv
 		}
 		$cnt = 0;
 		if (strlen($kvstr) == 0) {
-			addLog("no field found to be set: $table");
+			$this->addLog("no field found to be set: $table");
 		}
 		else {
-			if (isset($condStr))
-				$sql = sprintf("UPDATE %s SET %s WHERE %s", $table, $kvstr, $condStr);
-			else
+			if (preg_match('/^(\w+) t0\b/u', $table) && $this->DBTYPE == "mssql") {
+				$sql = sprintf("UPDATE t0 SET %s FROM %s", $kvstr, $table);
+			}
+			else {
 				$sql = sprintf("UPDATE %s SET %s", $table, $kvstr);
+			}
+			if (isset($condStr)) {
+				$sql .= "\nWHERE " . $condStr;
+			}
 			$cnt = $this->execOne($sql);
 		}
 		return $cnt;
@@ -2172,6 +2430,69 @@ function utf8InputFilter($fp, $fnTest=null)
 	if ($fnTest)
 		$fnTest($str);
 }
+
+/**
+@fn name2id($refNameFields, $refIdField, $refTable, $nameFields, $opt=[])
+
+常用于导入，或数据同步，把code/name等唯一字段替换成内部id.
+
+- 支持缓存数据，以优化循环效率
+- 支持查不到时报错或自动添加两种模式
+
+实例：如果给定数组（默认$_POST）含有cateName字段，则通过查询表ItemCategory中的name字段，得到相应的id字段，用cateId字段替代原cateName字段：
+
+	name2id("cateName", "cateId", "ItemCategory", "name");
+	(即 cateId = SELECT id FROM ItemCategory WHERE name={cateName} )
+
+如果查不到则会报错。
+也可指定不报错(doAutoAdd)，直接插入ItemCategory表中，用新插入的id值作为cateId字段，替代原cateName字段：
+
+	name2id("cateName", "cateId", "ItemCategory", "name", ["doAutoAdd"=>true]);
+
+如果添加时还要指定其它字段，指定onAdd：
+
+	name2id("cateName", "cateId", "ItemCategory", "name", [
+		"doAutoAdd"=>true, 
+		"onAdd" => function (&$data) {
+			$data["contactName"] = $_POST["cateContactName"];
+			$data["tm"] = date(FMT_DT);
+		},
+		// "arr" => &$myarr, // 修改$myarr数组，而不是默认的$_POST，注意加'&'
+	]);
+
+TODO: 支持多字段联合查询:
+
+	name2id("city,storeName", "storeId", "Store", "city,name");
+
+*/
+function name2id($refNameFields, $refIdField, $refTable, $nameFields, $opt = [])
+{
+	if (is_array($opt["arr"])) {
+		$arr = &$opt["arr"];
+	}
+	else {
+		$arr = &$_POST;
+	}
+	if (issetval($refNameFields, $arr)) {
+		$v = $arr[$refNameFields];
+		$id = SimpleCache::getInstance()->get("name2id-$refTable-$refNameFields-$v", function () use ($refTable, $refNameFields, $nameFields, $v, $opt) {
+			$id = queryOne("SELECT id FROM $refTable WHERE $nameFields=" . Q($v));
+			if (! $id) {
+				if (! $opt["doAutoAdd"])
+					jdRet(E_PARAM, "bad $refNameFields", "找不到被引用的数据: " . $v); 
+				$data = [];
+				$data[$nameFields] = $v;
+				if ($opt["onAdd"]) {
+					$opt["onAdd"]($data);
+				}
+				$id = dbInsert($refTable, $data);
+			}
+			return $id;
+		});
+		$arr[$refIdField] = $id;
+		unset($arr[$refNameFields]);
+	}
+}
 //}}}
 
 // ====== classes {{{
@@ -2189,50 +2510,110 @@ function utf8InputFilter($fp, $fnTest=null)
 	++ $env->DBH->skipLogCnt;  // 若要忽略两条就用 $env->DBH->skipLogCnt+=2
 	$env->DBH->exec('set names utf8mb4'); // 也可以是queryOne/execOne等函数。
 
+设置`$GLOBALS["conf_disableSkipLog"]=1`可忽略skipLogCnt机制，常用于数据库底层调试。
+
 @see queryAll,execOne,dbconn
  */
 class JDPDO extends PDO
 {
-	protected $env;
 	public $skipLogCnt = 0;
 	private $logH;
 
-	function __construct($dsn, $user = null, $pwd = null, $env = null)
+	static function create($dsn, $user, $pwd, $dbtype) {
+		$cls = "JDPDO_" . $dbtype;
+		if (!class_exists($cls))
+			$cls = "JDPDO";
+		$dbh = new $cls($dsn, $user, $pwd);
+		return $dbh;
+	}
+
+	// JDPDO interface
+	function initConn() {
+	}
+	function addLimit1(&$sql) {
+	}
+	// mysql style
+	function paging(&$sql, $limit, $offset=0) {
+		if ($offset == 0) {
+			$sql .= "\nLIMIT $limit";
+		}
+		else {
+			$sql .= "\nLIMIT $offset, $limit";
+		}
+	}
+	function acceptAliasInGroupBy() {
+		return true;
+	}
+	// end
+
+	function __construct($dsn, $user = null, $pwd = null)
 	{
 		$opts = [];
 		// 如果使用连接池, 偶尔会出现连接失效问题, 所以缺省不用
 		if (hasSignFile("CFG_CONN_POOL"))
 			$opts[PDO::ATTR_PERSISTENT] = true;
 		parent::__construct($dsn, $user, $pwd, $opts);
-		$this->env = $env ?: getJDEnv();
 	}
 	private function addLog($str)
 	{
 		if ($this->skipLogCnt > 0) {
 			-- $this->skipLogCnt;
-			$this->logH = null;
-			return;
+			//$this->logH = null;
+			if (! $GLOBALS["conf_disableSkipLog"])
+				return;
 		}
-		$this->logH = $this->env->addLog($str, 9);
+		$env = getJDEnv();
+		$this->logH = $env->addLog($str, 9);
 	}
 	function amendLog($str) {
 		if ($this->logH) {
-			$this->env->amendLog($this->logH, function (&$data) use ($str) {
+			$env = getJDEnv();
+			$env->amendLog($this->logH, function (&$data) use ($str) {
 				$data .= " -- " . $str;
 			});
 		}
 	}
-	function query($sql)
+/**
+@key conf_tableAlias 配置数据库表的别名
+
+常用于跨库调用和jdcloud微服务配置。
+例如主系统saic需要集成erp子系统用于库存管理，在erp子系统中应配置直接使用主系统saic中的用户、权限等表，可在conf.user.php中配置：
+
+	$GLOBALS["conf_tableAlias"] = [
+		"Employee" => "saic.Employee",
+		"Role" => "saic.Role",
+		"Cinf" => "saic.Cinf",
+		"ApiLog" => "saic.ApiLog",
+		"ObjLog" => "saic.ObjLog",
+		"Syslog" => "saic.Syslog"
+	];
+
+*/
+	protected function filterSql(&$sql) {
+		if (! isset($GLOBALS["conf_tableAlias"]))
+			return;
+		$conf_tableAlias = $GLOBALS["conf_tableAlias"];
+		$sql = preg_replace_callback('/(?:FROM|JOIN|UPDATE|DELETE|INSERT INTO) \K(\w+)/iu', function ($ms) use ($conf_tableAlias) {
+			if (array_key_exists($ms[1], $conf_tableAlias)) {
+				return $conf_tableAlias[$ms[1]];
+			}
+			return $ms[1];
+		}, $sql);
+	}
+
+	function query($sql, $fetchMode=0)
 	{
+		$this->filterSql($sql);
 		$this->addLog($sql);
-		return parent::query($sql);
+		return parent::query($sql, $fetchMode);
 	}
 	function exec($sql, $getInsertId = false)
 	{
+		$this->filterSql($sql);
 		$this->addLog($sql);
 		$rv = parent::exec($sql);
 		if ($getInsertId)
-			$rv = (int)parent::lastInsertId();
+			$rv = (int)$this->lastInsertId();
 
 		if ($this->logH)
 			$this->amendLog($getInsertId? "new id=$rv": "cnt=$rv");
@@ -2242,6 +2623,89 @@ class JDPDO extends PDO
 	{
 		$this->addLog($sql);
 		return parent::prepare($sql, $opts);
+	}
+}
+
+class JDPDO_sqlite extends JDPDO
+{
+}
+
+class JDPDO_mysql extends JDPDO
+{
+	function initConn() {
+		$this->skipLogCnt += 2;
+		$this->exec('set names utf8mb4');
+		$this->exec('set sql_mode=\'\''); // compatible for mysql8
+	}
+	function addLimit1(&$sql) {
+		if (stripos($sql, "limit ") === false && stripos($sql, "for update") === false)
+			$sql .= " LIMIT 1";
+	}
+}
+
+class JDPDO_mssql extends JDPDO
+{
+	function initConn() {
+		$this->skipLogCnt += 1;
+		$this->exec('SET ansi_warnings OFF'); // disable truncate error
+	}
+	function paging(&$sql, $limit, $offset=0) {
+		if ($offset == 0) {
+			$sql = preg_replace('/^SELECT \K/i',  "TOP $limit ", $sql);
+		}
+		else {
+			if (!preg_match('/(ORDER\s+BY.*?) \s* $/isx', $sql))
+				jdRet(E_SERVER, "bad sql: require ORDER BY for paging");
+			$sql .= "\nOFFSET $offset ROWS FETCH NEXT $limit ROWS ONLY";
+# 			$body = $ms[1];
+# 			$orderby = "ORDER BY t0.id";
+# 			if (preg_match('/ORDER\s+BY [\.|\w]+(\s*,\s*[\.|\w]+)*/i', $body, $ms1)) {
+# 				$orderby = $ms1[0];
+# 			}
+# 			$offset2 = $offset + $limit;
+# 			$sql = "SELECT * FROM (SELECT ROW_NUMBER() OVER($orderby) _row, {$body}) t0 WHERE _row BETWEEN {$offset} AND {$offset2}";
+		}
+	}
+
+	function lastInsertId($seqName = null) {
+		if (! $GLOBALS["conf_mssql_useOdbc"])
+			return PDO::lastInsertId($seqName);
+		// 不用$this->query, 避免log和额外处理
+		// !!!NOTE: unixodbc下mssql驱动有bug, SCOPE_IDENTITY()返回空，只能暂时用@@IDENTITY替代. 
+		// 注意INSERT时若存在trigger可能会导致id返回错误。
+        //$sth = PDO::query("SELECT SCOPE_IDENTITY()");
+        $sth = PDO::query("SELECT @@IDENTITY");
+		$row = $sth->fetch(PDO::FETCH_NUM);
+		return $row[0];
+	}
+
+	function query($s, $fetchMode=0) {
+		if ($GLOBALS["conf_mssql_translateMysql"])
+			MssqlCompatible::translateMysqlToMssql($s);
+	    return parent::query($s, $fetchMode);
+	}
+
+	function acceptAliasInGroupBy() {
+		return false;
+	}
+}
+
+class JDPDO_oracle extends JDPDO
+{
+	function initConn() {
+		++ $this->skipLogCnt;
+		$this->exec("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'");
+	}
+	function addLimit1(&$sql) {
+		/*
+		// 12c support 'fetch first 1 row'
+		if (stripos($sql, "ROWNUM") === false && stripos($sql, "fetch ") === false)
+			$sql = "SELECT * FROM ($sql) t WHERE ROWNUM<=1";
+		*/
+	}
+	function exec($sql, $getInsertId = false) {
+		// NOTE: oracle DO NOT support getLastId(). dont use dbInsert() to get id!
+		return parent::exec($sql, false);
 	}
 }
 
