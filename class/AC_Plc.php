@@ -3,8 +3,8 @@
 class AC_Plc extends JDApiBase
 {
 	function api_read() {
-		$plcCode = param("code");
-		$items = explode(',', mparam("items"));
+		$plcCode = $this->env->param("code");
+		$items = explode(',', $this->env->mparam("items"));
 		if (count($items) == 0)
 			return;
 
@@ -42,7 +42,7 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_write() {
-		$plcCode = param("code");
+		$plcCode = $this->env->param("code");
 		$items = $this->env->_POST;
 		if (count($items) == 0)
 			return;
