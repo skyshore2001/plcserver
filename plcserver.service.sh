@@ -35,7 +35,7 @@ After=syslog.target network.target auditd.service
 [Service]
 Type=simple
 User=builder
-ExecStart=/bin/sh -c "swoole $svc.php &>> $svc.log"
+ExecStart=/bin/sh -c "swoole jdserver.php &>> $svc.log"
 WorkingDirectory=$dir
 Restart=on-failure
 RestartSec=5s
