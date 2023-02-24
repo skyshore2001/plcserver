@@ -130,13 +130,13 @@ class AC_Plc extends JDApiBase
 					$code = $itemCodeList[$i];
 					$watch = $watchItems[$code]['watch'];
 					$post = [$code => $value];
-					echo("!!! item `$code` value change: $old => $value\n");
+					writeLog("!!! item `$code` value change: " . jsonEncode($old) . " => " . jsonEncode($value));
 					if (is_array($watch)) {
 						$res = self::readItems($plcConf, $watch, $plcObj);
 						$post += $res;
 					}
 					$url = $plcConf['notifyUrl'];
-					echo("!!! notify $url: " . jsonEncode($post) ."\n");
+					writeLog("!!! notify $url: " . jsonEncode($post) ."\n");
 					httpCall($url, $post);
 				}
 			}
