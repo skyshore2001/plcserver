@@ -262,6 +262,8 @@ class PlcAccess
 		$byte = 0;
 		$ret = '';
 		foreach ($bitArr as $v) {
+			if (!is_int($v))
+				$v = intval($v);
 			$byte |= (($v & 0x1) << $i);
 			if ($i++ == 8) {
 				$ret .= pack("C", $byte);
