@@ -15,6 +15,28 @@ class PlcAccess
 		"dint" => "int32"
 	];
 
+	static protected $typeMap = [
+		// len: 字节数
+		"bit" => ["fmt"=>"C", "len"=>1],
+		"int8" => ["fmt"=>"c", "len"=>1],
+		"uint8" => ["fmt"=>"C", "len"=>1],
+
+		"int16" => ["fmt"=>"n", "len"=>2],
+		"uint16" => ["fmt"=>"n", "len"=>2],
+
+		"int32" => ["fmt"=>"N", "len"=>4],
+		"uint32" => ["fmt"=>"N", "len"=>4],
+
+		"int64" => ["fmt"=>"J", "len"=>8],
+		"uint64" => ["fmt"=>"J", "len"=>8],
+
+		"float" => ["fmt"=>"f", "len"=>4],
+		"double" => ["fmt"=>"d", "len"=>8],
+
+		"char" => ["fmt"=>"a", "len"=>1],
+		"string" => ["fmt"=>"a", "len"=>1]
+	];
+
 	static function readPlc($proto, $addr, $items) {
 		$plc = PlcAccess::create($proto, $addr);
 		return $plc->read($items);
@@ -58,8 +80,9 @@ class PlcAccess
 	}
 
 	// item: {code, type, isArray, amount}
-	protected function readItem($item, $packFmt, $value0) {
+	protected function readItem($item, $value0) {
 		$t = $item["type"];
+		$packFmt = self::$typeMap[$t]["fmt"];
 		if ($t == "char") {
 			if ($item["amount"] == strlen($value0)) {
 				$value = $value0;
@@ -79,6 +102,9 @@ class PlcAccess
 				$value = substr($value0, 2);
 			}
 		}
+		else if ($t == "bit") {
+			return self::readBitItem($item, $value0);
+		}
 		else if (! $item["isArray"]) {
 			$value = unpack($packFmt, $value0)[1];
 		}
@@ -90,9 +116,35 @@ class PlcAccess
 		return $value;
 	}
 
+	static function readBitItem($item, $value0) {
+		$arr = unpack("C*", $value0); // NOTE: index from 1
+		$n = $item["amount"];
+		if (! $item["isArray"])
+			return self::getBit($arr[1], $item["bit"]);
+
+		$rv = [];
+		for ($i=$item["bit"], $bi=1; $n > 0; --$n) {
+			$rv[] = self::getBit($arr[$bi], $i);
+			if ($i == 7) {
+				$i = 0;
+				++ $bi;
+			}
+			else {
+				++ $i;
+			}
+		}
+		return $rv;
+	}
+
 	// item: {code, type, isArray, amount, value}
-	protected function writeItem($item, $packFmt) {
+	protected function writeItem($item) {
 		$t = $item["type"];
+		if ($t == "bit") {
+			if (! $item["isArray"])
+				return pack("C", ($item["value"]?1:0));
+			return self::packBits($item["value"]);
+		}
+		$packFmt = self::$typeMap[$t]["fmt"];
 		if ($t == "char" || $t == "string") {
 			$valuePack = $item["value"];
 		}
@@ -133,7 +185,8 @@ class PlcAccess
 			"code"=>$ms["code"],
 			"type"=>$ms["type"],
 			"isArray" => isset($ms["amount"]),
-			"amount" => (@$ms["amount"]?:1)
+			"amount" => (@$ms["amount"]?:1),
+			"bit" => 0
 		];
 		if ($value !== null) {
 			// char and string is specical!
@@ -199,4 +252,45 @@ class PlcAccess
 				$value -= 0x100000000;
 		}
 	}
+
+	private static function getBit($x, $n) {
+		return ($x >> $n) & 1;
+	}
+
+	private static function packBits($bitArr) {
+		$i = 0;
+		$byte = 0;
+		$ret = '';
+		foreach ($bitArr as $v) {
+			$byte |= (($v & 0x1) << $i);
+			if ($i++ == 8) {
+				$ret .= pack("C", $byte);
+				$byte = 0;
+				$i = 0;
+			}
+		}
+		if ($i) {
+			$ret .= pack("C", $byte);
+		}
+		return $ret;
+	}
+
+	/*
+	private static function unpackBits($res, $pos, $bitCnt) {
+		$value = [];
+		for ($i=0,$j=8; $i<$bitCnt; ++$i,++$j) {
+			if ($j == 8) {
+				$j = 0;
+				$byte = ord($res[$pos ++]);
+			}
+			if ($byte & (0x01 << $j)) {
+				$value[] = 1;
+			}
+			else {
+				$value[] = 0;
+			}
+		}
+		return $value;
+	}
+	*/
 }

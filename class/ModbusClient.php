@@ -33,24 +33,6 @@ class ModbusClient extends PlcAccess
 	protected $addr;
 	protected $fp;
 
-	static protected $typeMap = [
-		// len: 字节数
-		"bit" => ["fmt"=>"C", "len"=>0.125],
-		"int8" => ["fmt"=>"C", "len"=>1],
-		"uint8" => ["fmt"=>"C", "len"=>1],
-
-		"int16" => ["fmt"=>"n", "len"=>2],
-		"uint16" => ["fmt"=>"n", "len"=>2],
-
-		"int32" => ["fmt"=>"N", "len"=>4],
-		"uint32" => ["fmt"=>"N", "len"=>4],
-
-		"float" => ["fmt"=>"f", "len"=>4],
-		"char" => ["fmt"=>"a", "len"=>1],
-		"string" => ["fmt"=>"a", "len"=>1]
-		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
-	];
-
 	function __construct($addr) {
 		$this->addr = $addr;
 	}
@@ -86,20 +68,8 @@ class ModbusClient extends PlcAccess
 				$error = "item `$addr`: wrong response byte count: expect $expectedCnt, actual $byteCnt";
 				throw new PlcAccessException($error);
 			}
-			$t = $item["type"];
-			if ($item["type"] == "bit") {
-				if (! $item["isArray"]) {
-					$value = ord($res[$pos]) & 0x1;
-				}
-				else { // bit数组
-					$value = self::unpackBits($res, $pos, $item["amount"]);
-				}
-			}
-			else {
-				$value0 = substr($res, $pos, $byteCnt);
-				$packFmt = self::$typeMap[$t]["fmt"];
-				$value = $this->readItem($item, $packFmt, $value0);
-			}
+			$value0 = substr($res, $pos, $byteCnt);
+			$value = $this->readItem($item, $value0);
 			$ret[] = $value;
 		}
 		return $ret;
@@ -139,58 +109,19 @@ class ModbusClient extends PlcAccess
 		return $req;
 	}
 
-	private static function packBits($bitArr) {
-		$i = 0;
-		$byte = 0;
-		$ret = '';
-		foreach ($bitArr as $v) {
-			$byte |= (($v & 0x1) << $i);
-			if ($i++ == 8) {
-				$ret .= pack("C", $byte);
-				$byte = 0;
-				$i = 0;
-			}
-		}
-		if ($i) {
-			$ret .= pack("C", $byte);
-		}
-		return $ret;
-	}
-	private function unpackBits($res, $pos, $bitCnt) {
-		$value = [];
-		for ($i=0,$j=8; $i<$bitCnt; ++$i,++$j) {
-			if ($j == 8) {
-				$j = 0;
-				$byte = ord($res[$pos ++]);
-			}
-			if ($byte & (0x01 << $j)) {
-				$value[] = 1;
-			}
-			else {
-				$value[] = 0;
-			}
-		}
-		return $value;
-	}
-
 	// item: {code, type, amount, value, slaveId, startAddr}
 	protected function buildWritePacket($item) {
+		$valuePack = $this->writeItem($item);
+		$dataLen = strlen($valuePack);
 		if ($item["type"] == "bit") {
-			if (! $item["isArray"]) {
-				$valuePack = pack("C", $item["value"] & 0x1);
+			if ($item["isArray"]) { // bit数组
+				$cnt = count($item["value"]);
+			}
+			else {
 				$cnt = 1;
 			}
-			else { // bit数组
-				$cnt = count($item["value"]);
-				$valuePack = self::packBits($item["value"]);
-			}
-			$dataLen = strlen($valuePack);
 		}
 		else {
-			$t = $item["type"];
-			$packFmt = self::$typeMap[$t]["fmt"];
-			$valuePack = $this->writeItem($item, $packFmt);
-			$dataLen = strlen($valuePack);
 			if ($dataLen % 2 != 0) { // 补为偶数字节
 				++ $dataLen;
 				$valuePack .= "\x00";

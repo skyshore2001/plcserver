@@ -49,25 +49,6 @@ class S7Plc extends PlcAccess
 	protected $addr;
 	protected $fp;
 
-	static protected $typeMap = [
-		// WordLen: S7WLBit=0x01; S7WLByte=0x02; S7WLChar=0x03; S7WLWord=0x04; S7WLDWord=0x06; S7WLReal=0x08;
-		// TransportSize: TS_ResBit=0x03, TS_ResByte=0x04(byte/word/dword), TS_ResInt=0x05, TS_ResReal=0x07, TS_ResOctet=0x09
-		"bit" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x01, "TransportSize"=>0x03],
-		"int8" => ["fmt"=>"c", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
-		"uint8" => ["fmt"=>"C", "len"=>1, "WordLen"=>0x02, "TransportSize"=>0x04],
-
-		"int16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x04],
-		"uint16" => ["fmt"=>"n", "len"=>2, "WordLen"=>0x04, "TransportSize"=>0x04],
-
-		"int32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x04],
-		"uint32" => ["fmt"=>"N", "len"=>4, "WordLen"=>0x06, "TransportSize"=>0x04],
-
-		"float" => ["fmt"=>"f", "len"=>4, "WordLen"=>0x08, "TransportSize"=>0x07],
-		"char" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x03, "TransportSize"=>0x09],
-		"string" => ["fmt"=>"a", "len"=>1, "WordLen"=>0x03, "TransportSize"=>0x09]
-		// "double" => ["fmt"=>"?", "len"=>8, "WordLen"=>0x0?, "TransportSize"=>0x0?],
-	];
-
 	const pdu_type_CR    	= 0xE0;  // Connection request
 	const pdu_type_CC    	= 0xD0;  // Connection confirm
 	const pdu_type_DT    	= 0xF0;  // Data transfer
@@ -116,18 +97,14 @@ class S7Plc extends PlcAccess
 				throw new PlcAccessException($error);
 			}
 			$len = $ResData['DataLen'];
-			if ($ResData['TransportSize'] != 0x09 /* TS_ResOctet */
-					&& $ResData['TransportSize'] != 0x07 /* TS_ResReal */
-					&& $ResData['TransportSize'] != 0x03 /* TS_ResBit */
-				) {
-				$len /= 8; // bit数转byte数
+			if ($ResData['TransportSize'] != 0x04) {  // byte/word/dword
+				$error = "bad TransportSize: require 4(byte), got " . $ResData['TransportSize'];
+				throw new PlcAccessException($error);
 			}
+			$len /= 8; // bit数转byte数
 			$pos += 4;
 			$value = substr($res, $pos, $len);
-			$type = $item["type"];
-			$packFmt = self::$typeMap[$type]["fmt"];
-
-			$value1 = $this->readItem($item, $packFmt, $value);
+			$value1 = $this->readItem($item, $value);
 			$ret[] = $value1;
 
 			if ($len % 2 != 0) {
@@ -142,14 +119,14 @@ class S7Plc extends PlcAccess
 	// refer to: opWriteMultiVars (snap7 lib)
 	function write($items) {
 		$items1 = parent::write($items);
-		$writePacket = $this->buildWritePacket($items1);
+		$writePacket = $this->buildWritePacket($items1, $itemCnt); // 由于bitArray特殊处理导致cnt可能增加
 		$res = $this->isoExchangeBuffer($writePacket, $pos);
 
 		$ResParams = myunpack(substr($res, $pos, 2), [
 			"C", "FunWrite",
 			"C", "ItemCount"
 		]);
-		if ($ResParams["ItemCount"] != count($items)) {
+		if ($ResParams["ItemCount"] != $itemCnt) {
 			$error = 'bad server item count: ' . $ResParams["ItemCount"];
 			throw new PlcAccessException($error);
 		}
@@ -175,12 +152,18 @@ class S7Plc extends PlcAccess
 		]);
 		foreach ($items as $item) {
 			$t = $item["type"];
+			if ($t == "bit") {
+				$byteCnt = ceil( ($item["amount"] + $item["bit"]) / 8);
+			}
+			else {
+				$byteCnt = $item["amount"] * self::$typeMap[$t]["len"];
+			}
 			$ReqFunReadItem = mypack([
 				"C", 0x12,
 				"C", 0x0A,
 				"C", 0x10,
-				"C", self::$typeMap[$t]["WordLen"],
-				"n", $item["amount"],
+				"C", 0x02, // length type=byte
+				"n", $byteCnt,
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
 				"N", (0x84000000 | ($item["dbAddr"] * 8 + $item["bit"])) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
@@ -212,7 +195,8 @@ class S7Plc extends PlcAccess
 	}
 
 	// items: [{ code, dbNumber, type=int8/int16/int32/float/double, dbAddr, amount }]
-	protected function buildWritePacket($items) {
+	protected function buildWritePacket($items, &$itemCnt) {
+		self::handleBitArrayForWrite($items);
 		$itemCnt = count($items);
 		$ReqParams = mypack([
 			"C", 0x05, // FunWrite=pduFuncWrite
@@ -222,39 +206,32 @@ class S7Plc extends PlcAccess
 		$idx = 0;
 		foreach ($items as $item) {
 			$t = $item["type"];
+			$isBit = ($t == "bit");
+
+			$valuePack = $this->writeItem($item);
+			$byteCnt = strlen($valuePack);
 			// TReqFunWriteItem
 			$ReqFunWriteItem = mypack([
 				"C", 0x12,
 				"C", 0x0A,
 				"C", 0x10,
-				"C", self::$typeMap[$t]["WordLen"],
-				"n", $item["amount"],
+				"C", ($isBit? 0x01: 0x02), // length type=byte
+				"n", $byteCnt,
 				"n", $item["dbNumber"],
 				// "C", 0x84, // area: S7AreaDB; 位置: 8
 				"N", (0x84000000 | ($item["dbAddr"] * 8 + $item["bit"])) // 起始地址，按字节计转按位计。注意：这里需要修正，它只用了3B，与上1字节一起是4B
 			]);
 			$ReqParams .= $ReqFunWriteItem;
 			// ReqFunWriteDataItem 值在所有WriteItem之后
-			$packFmt = self::$typeMap[$t]["fmt"];
 
-			$valuePack = $this->writeItem($item, $packFmt);
-			$TransportSize = self::$typeMap[$t]["TransportSize"];
-			$size = $item["amount"] * self::$typeMap[$t]["len"]; // byte count
-			$len = $size;
-			if ($TransportSize != 0x09 /* TS_ResOctet */
-					&& $TransportSize != 0x07 /* TS_ResReal */
-					&& $TransportSize != 0x03 /* TS_ResBit */
-				) {
-				$len *= 8; // byte转bit
-			}
 			$ReqData .= mypack([
 				"C", 0x00,  // ReturnCode
-				"C", $TransportSize, 
-				"n", $len,
+				"C", ($isBit? 0x03: 0x04), // TransportSize: bit / byte
+				"n", ($isBit? $byteCnt: $byteCnt*8) // byte转bit
 			]) . $valuePack;
 			// Skip fill byte for Odd frame (except for the last one)
 			$idx ++;
-			if (($size % 2) != 0 && $idx != $itemCnt) {
+			if (($byteCnt % 2) != 0 && $idx != $itemCnt) {
 				$ReqData .= "\x00";
 			}
 		}
@@ -423,6 +400,30 @@ class S7Plc extends PlcAccess
 		if ($resPDUType != self::pdu_type_DT) { // data transfer package
 			$error = 'bad response package. require pdu_type_DT package';
 			throw new PlcAccessException($error);
+		}
+	}
+
+	// 实机似乎不支持一个item中写多个位，故改成多个items每个只写1位
+	private static function handleBitArrayForWrite(&$items) {
+		// bit array特殊处理,转成写amount个bit item
+		for ($i=count($items)-1; $i>=0; --$i) {
+			$item = $items[$i];
+			if ($item["type"] == "bit" && $item["isArray"]) {
+				$valueArr = $item["value"];
+				$itemArr = [];
+
+				$item["isArray"] = false;
+				$item["amount"] = 1;
+				foreach ($valueArr as $v) {
+					$item["value"] = $v;
+					$itemArr[] = $item;
+					if (++ $item["bit"] == 8) {
+						++ $item["dbAddr"];
+						$item["bit"] = 0;
+					}
+				}
+				array_splice($items, $i, 1, $itemArr);
+			}
 		}
 	}
 }
