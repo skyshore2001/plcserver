@@ -188,7 +188,7 @@ class PlcAccess
 			"amount" => (@$ms["amount"]?:1),
 			"bit" => 0
 		];
-		if ($value !== null) {
+		if (func_num_args() == 2) { // NOTE: dont use `$value !== null`, $value may be null!
 			// char and string is specical!
 			if ($item["type"] == "char") {
 				$diff = $item["amount"] - strlen($value);

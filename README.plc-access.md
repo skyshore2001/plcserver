@@ -111,7 +111,7 @@ modbus协议地址格式为：
 
 	php plc-access.php DB21.0:uint32=0x61000162 DB21.0:byte[4] -x
 
-TODO: 字节序指定参数。
+TODO: 字节序一般为网络序(大端), 若为小端, 可在PlcAccess::typeMap里面为int16/int32等指定fmt2参数。
 
 ## PHP编程示例
 
@@ -208,4 +208,10 @@ $res = $plc->read(["DB21.0:int8[4]", "DB21.4:float", "DB21.8:float"]);
 	$res = $plc->read(["DB21.0:string[4]"]); // 读到"ab"
 
 与定长字符串相比，变长字符串读数据时会读全部长度，返回实际长度的字符串，写数据时只会写指定长度。
+
+**null值**
+
+字符串(char[]或string[])设置值为null与设置""相同.
+数值型设置null与设置0相同.
+读取时必有值, 不可能读出null.
 
