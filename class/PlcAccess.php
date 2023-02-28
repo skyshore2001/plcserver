@@ -73,7 +73,8 @@ class PlcAccess
 	function write($items) {
 		$items1 = [];
 		foreach ($items as $e) {
-			$item = $this->parseItem($e[0], $e[1]);
+			$val = $e[1] === null? "": $e[1];
+			$item = $this->parseItem($e[0], $val);
 			$items1[] = $item;
 		}
 		return $items1;
@@ -173,6 +174,7 @@ class PlcAccess
 	}
 
 	// return: {code, type, isArray, amount, value?}
+	// value=null means for read item
 	protected function parseItem($itemAddr, $value = null) {
 		if (! preg_match('/^(?<code>.*):(?<type>\w+) (?:\[(?<amount>\d+)\])?$/x', $itemAddr, $ms)) {
 			$error = "bad plc item addr: `$itemAddr`";
@@ -188,7 +190,7 @@ class PlcAccess
 			"amount" => (@$ms["amount"]?:1),
 			"bit" => 0
 		];
-		if (func_num_args() == 2) { // NOTE: dont use `$value !== null`, $value may be null!
+		if ($value !== null) { // for write, NOTE: value CAN NOT be null!
 			// char and string is specical!
 			if ($item["type"] == "char") {
 				$diff = $item["amount"] - strlen($value);
