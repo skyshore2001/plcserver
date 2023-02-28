@@ -22,11 +22,12 @@ input {
 </form>
 <div id="msg"></div>
 
-<form action="http://localhost:8081/push" target="ifr">
+<form action="http://localhost:8081/push" method="POST" target="ifr">
 	app: <input name="app" value="app1">
 	user: <input name="user" value="user1">
 	msg: <textarea name="msg">hello</textarea>
 	<button>推送消息</button>
+	<button type="button" onclick="pushViaWs(this)">推送消息(通过websocket)</button>
 </form>
 
 <form action="http://localhost:8081/getUsers" target="ifr">
@@ -34,7 +35,7 @@ input {
 	<button>取在线用户</button>
 </form>
 
-<form action="http://localhost:8081/setTimeout" target="ifr">
+<form action="http://localhost:8081/setTimeout" method="POST" target="ifr">
 	延时(ms): <input name="wait" value="3000">
 	url: <input name="url" value="http://oliveche.com/echo.php?a=1" style="width:300px"><br>
 	data: <textarea name="data">b=2&amp;c=3</textarea>
@@ -51,6 +52,10 @@ input {
 // var url = '//localhost:8081'
 // var url = '//oliveche.com/jdserver'
 var url = '/jdserver';
+var m = location.pathname.match(/^\/@[^\/]+/);
+if (m) {
+	url = m[0] + url;
+}
 document.querySelectorAll('form[action^=http]').forEach(e => {
 	e.action = e.action.replace('http://localhost:8081', url)
 })
@@ -71,6 +76,20 @@ function connectWs(form) {
 		console.log(msg);
 		document.getElementById('msg').innerHTML = msg + "<br>" + document.getElementById('msg').innerHTML;
 	}, opt);
+}
+
+function pushViaWs(btn) {
+	if (!ws) {
+		console.error("no websocket connection");
+		return;
+	}
+	var form = btn.form;
+	ws.send({
+		ac: "push",
+		app: form.app.value,
+		user: form.user.value,
+		msg: form.msg.value
+	});
 }
 
 /**
