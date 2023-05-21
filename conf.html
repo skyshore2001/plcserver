@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>plcserver - conf</title>
+<script src="lib/jsoneditor.min.js"></script>
+<script src="lib/jsoneditor-cn.js"></script>
+<script src="lib/common.js"></script>
+<link rel="stylesheet" href="lib/spectre-scoped.min.css">
+</head>
+
+<body class="spectre">
+<h1>配置plcserver
+<button id='submit' class="btn btn-primary" style="margin-left:10px; padding: 5px 10px;">保存配置</button>
+</h1>
+
+<div id='editor_holder'></div>
+<script>
+// ====== globals ======
+var conf;
+
+var schema = {
+	title: "Plc",
+	type: "array",
+	format: "tabs-top",
+	items: {
+		type: "object",
+		title: "Plc",
+		headerTemplate: "{{self.name}}",
+		properties: {
+			name: {
+				type: "string",
+				required: true
+			},
+			addr: {
+				type: "string",
+				required: true,
+				description: "e.g. <code>s7://127.0.0.1</code>(tcp port 102) <code>modbus://192.168.1.1</code> (tcp port 502)"
+			},
+			items: {
+				type: "array",
+				format: "tabs",
+				required: true,
+				items: {
+					type: "object",
+					title: "变量",
+					headerTemplate: "{{self.name}}",
+					properties: {
+						name: {
+							type: "string",
+							required: true
+						},
+						addr: {
+							type: "string",
+							required: true,
+							description: "s7地址: <code>DB21.0:word</code> <code>DB21.0.0:bit</code> <code>DB21.0.0:bit[2]</code> <code>DB21.2:char[8]</code> <code>DB21.2:string[8]</code><br>" + 
+								"modbus地址: <code>S{slaveId}.{startAddr}:{type}</code> 示例: <code>S1.0:byte</code> <code>S1.0:word[4]</code><br>" +
+								"类型: int8, uint8/byte, int16/int, uint16/word, int32/dint, uint32/dword, bit/bool, float, char[len], string[maxLen]",
+						},
+						dscr: {
+							type: "string",
+							format: "textarea",
+						},
+						watch: {
+							type: "array",
+							format: "table",
+							items: {
+								title: "附加字段",
+								type: "string",
+								required: true
+							}
+						},
+						disabled: {
+							type: "boolean"
+						}
+					}
+				}
+			},
+			notifyUrl: {
+				type: "string"
+			},
+			disabled: {
+				type: "boolean"
+			}
+		}
+	}
+}
+
+// ====== functions ======
+function initJsonEditor()
+{
+	// 为JSONEditor扩展onNotify回调
+	var oldfn = JSONEditor.prototype.notifyWatchers;
+	JSONEditor.prototype.notifyWatchers = notifyWatchers;
+//	JSONEditor.prototype.getEditorByDom = getEditorByDom;
+
+	Object.assign(JSONEditor.defaults.options, {
+		//theme: "bootstrap4",
+		//iconlib: "fontawesome4", 
+		theme: "spectre",
+		iconlib: "spectre",
+		remove_empty_properties: true,
+		use_default_values: false,
+		show_opt_in: true,
+		ace: {
+			enableBasicAutocompletion: true,
+			enableSnippets: true,
+			enableLiveAutocompletion: true
+		}
+	});
+
+	// hack: 允许在title/description中出现html
+	window.DOMPurify = {
+		sanitize: function (e) { return e }
+	};
+
+	// hack: 支持onNotify回调
+	function notifyWatchers(path) {
+//		console.log('change', path, this);
+		var ed = this.getEditor(path);
+		if (ed && ed.options) {
+			if (ed.options.onNotify) {
+				var isManualChange = event && event.type == "change";
+				var val = ed.options.onNotify.call(ed, ed.getValue(), isManualChange);
+				if (val !== undefined) {
+					ed.header_text = val;
+					ed.updateHeaderText();
+				}
+			}
+		}
+		oldfn.call(this, path);
+	}
+
+/*
+	function getEditorByDom(dom) {
+		var jo = $(dom).closest("[data-schemapath]");
+		return this.getEditor(jo.attr("data-schemapath"));
+	}
+	*/
+}
+
+async function save(conf)
+{
+	var conf1 = JSON.parse(JSON.stringify(conf)); // 深拷贝
+	conf1 = arr2map(conf1, "name", (v) => {
+		v.items = arr2map(v.items, "name");
+	});
+	console.log(conf1);
+	callSvr("Plc.conf", conf1, {useJson:1});
+}
+
+// ====== main ======
+async function main()
+{
+	var conf = await callSvr("plc.json");
+	conf = map2arr(conf, "name", (k, v) => {
+		v.items = map2arr(v.items, "name");
+	});
+	console.log(conf);
+
+	initJsonEditor();
+	var dom = document.getElementById('editor_holder');
+	//dom.classList.add('spectre');
+	var editor = new JSONEditor(dom, {
+		schema: schema,
+		startval: conf
+	});
+
+	document.getElementById('submit').addEventListener('click',function() {
+		save(editor.getValue());
+	});
+}
+
+main();
+</script>
+</body>
+</html>

@@ -2,6 +2,8 @@
 
 class AC_Plc extends JDApiBase
 {
+	static $conf, $tmConf;
+
 	function api_read() {
 		$plcCode = $this->env->param("code");
 		$items = explode(',', $this->env->mparam("items"));
@@ -27,6 +29,11 @@ class AC_Plc extends JDApiBase
 	}
 
 	static protected function loadPlcConf() {
+		clearstatcache();
+		$tmConf = filemtime("plc.json");
+		if ($tmConf === self::$tmConf)
+			return self::$conf;
+
 		$confStr = file_get_contents("plc.json");
 		if (! $confStr)
 			return [];
@@ -38,6 +45,30 @@ class AC_Plc extends JDApiBase
 			$plcConf["code"] = $code;
 		}
 		unset($plcConf);
+		self::$conf = $conf;
+		self::$tmConf = $tmConf;
+		echo("### load conf: plc.json\n");
+
+		// 部署watch任务
+		foreach ($conf as $plcCode => $plcConf) {
+			if ($plcConf['disabled'])
+				continue;
+			$watchItems = array_filter($plcConf['items'], function ($item) {
+				return !$item['disabled'] && isset($item['watch']);
+			});
+
+			if (count($watchItems) > 0) { // {itemCode=>item}
+				// 注意：配置变化后(watchPlc()中检查self::$tmConf)，将自动退出
+				go(function () use ($plcConf, $watchItems) {
+					try {
+						self::handleWatchItems($plcConf, $watchItems);
+					}
+					catch (Exception $ex) {
+						echo("*** handleWatchItems fails: $ex\n");
+					}
+				});
+			}
+		}
 		return $conf;
 	}
 
@@ -152,25 +183,12 @@ class AC_Plc extends JDApiBase
 	}
 
 	static function init() {
-		$conf = self::loadPlcConf();
-		foreach ($conf as $plcCode => $plcConf) {
-			if ($plcConf['disabled'])
-				continue;
-			$watchItems = array_filter($plcConf['items'], function ($item) {
-				return !$item['disabled'] && isset($item['watch']);
-			});
+		self::loadPlcConf();
+	}
 
-			if (count($watchItems) > 0) { // {itemCode=>item}
-				go(function () use ($plcConf, $watchItems) {
-					try {
-						self::handleWatchItems($plcConf, $watchItems);
-					}
-					catch (Exception $ex) {
-						echo("*** handleWatchItems fails: $ex\n");
-					}
-				});
-			}
-		}
+	function api_conf() {
+		file_put_contents("plc.json", jsonEncode($this->env->_POST, true));
+		self::init();
 	}
 
 	function api_test() {
@@ -193,10 +211,14 @@ class AC_Plc extends JDApiBase
 	}
 
 	static function watchPlc($addr, $items, $cb) {
+		$tmConf = self::$tmConf;
 		while (true) {
 			try {
 				$plc = self::create($addr);
 				while (true) {
+					// 配置更新后，退出协程
+					if ($tmConf !== self::$tmConf)
+						return;
 					$res = $plc->read($items);
 					$cb($plc, $res);
 					sleep(1);

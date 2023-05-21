@@ -1,62 +1,71 @@
 <html>
 <script src="lib/vue.js"></script>
+<script src="lib/common.js"></script>
+<style>
+.plc {
+
+}
+th {
+	background-color: #f0f0f0;
+}
+th, td {
+	border: 1px solid #ccc;
+	padding: 0.5em;
+}
+
+.op {
+	margin: 10px 0px;
+}
+button {
+	min-width: 100px;
+}
+</style>
 
 <body>
 <div id="app">
 	<div class="plc" v-for="(plc, plcname) in plcs">
-		plcname: <input v-model="plcname">
-		plcaddr: <input v-model="plc.addr">
-		items:
-		<div class="items">
-			<div class="item" v-for="(item, itemname) in plc.items">
-				name: <input v-model="itemname">
-				addr: <input v-model="item.addr">
-				val: <input v-model="item.val" @dblclick="setValue(plcname, itemname, item.val)">
-				watch: <input type="checkbox" v-model="item.watch">
-			</div>
-		</div>
+		<a href="conf.html" target="_blank">Plc={{plcname}} ({{plc.addr}})</a>
+		<table class="items">
+			<tr>
+				<th>变量名</th>
+				<th>地址</th>
+				<th>值 <span style="font-size:0.7em; color:blue">(双击修改)</span></th>
+			</tr>
+			<tr class="item" v-for="(item, itemname) in plc.items">
+				<td>{{itemname}}</td>
+				<td>{{item.addr}}</td>
+				<td align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
+			</tr>
+		</table>
 	</div>
 </div>
 </body>
 
 <script>
-
-function callSvr(url, data) {
-	var opt = null;
-	if (data) {
-		opt = {
-			method: "post",
-			body: data,
-			headers: {
-				"Content-Type": "application/x-www-form-urlencoded"
-			}
-		};
-	}
-	return fetch(url, opt).then(e => e.json())
-}
-
 var vm = new Vue({
 	el: "#app",
 	data: {
 		plcs: {},
 	},
 	async created() {
+		this.plcs = await callSvr("plc.json");
 		this.update();
 		setInterval(() => this.update(), 5000);
 	},
 	methods: {
 		async update() {
-			const plcs = await callSvr("plc.json");
-			for (const [plcCode, plc] of Object.entries(plcs)) {
-				const rv = await callSvr(`Plc.read?code=${plcCode}&items=ALL`);
+			for (const [plcname, plc] of Object.entries(this.plcs)) {
+				const rv = await callSvr(`Plc.read?code=${plcname}&items=ALL`);
 				if (rv[0])
 					return;
 				for (const [k, v] of Object.entries(rv[1])) {
-					plc.items[k].val = v;
+					if (plc.items[k] === undefined) {
+						console.warn(`unknown field ${plcname}.${k}`);
+						continue;
+					}
+					this.$set(plc.items[k], "val", v);
 				}
 			}
-			this.plcs = plcs;
-			//console.log(plcs);
 		},
 
 		setValue(plcname, itemname, val) {

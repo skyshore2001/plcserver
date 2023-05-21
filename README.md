@@ -37,8 +37,10 @@ jdserver的消息推送与任务调度服务保留不变。
 
 根据conf.user.template.php创建配置文件conf.user.php，指定数据库连接。一般使用mysql数据库。
 
-根据示例plc.example.json创建PLC各地址字段的配置文件plc.json.
-TODO: 配置工具
+根据示例plc.example.json创建PLC各地址字段的配置文件plc.json，或直接使用web配置工具（后面会讲）。
+
+如果服务运行时手工更新了plc.json，在读写数据时会自动加载，一般不必重启服务。
+但这期间监控变量（设置了watch的变量）未更新，若想立即更新配置，可以手工读一次数据。
 
 测试运行：
 
@@ -64,9 +66,14 @@ TODO: 配置工具
 	ln -sf /var/www/src/plcserver ./
 
 注意已在.htaccess文件中配置了转发，Apache须打开proxy和rewrite模块。
-打开网页中查看字段值，双击字段值可以修改值：
+
+打开Web监控页，可查看各字段值，双击字段值可以修改值：
 
 	http://localhost/plcserver/
+
+点击Plc上链接可打开Web配置页，也可以直接打开Web配置页：
+
+	http://localhost/plcserver/conf.html
 
 ## 读、写接口
 
@@ -139,6 +146,17 @@ POST http://localhost/jdcloud/api/Plc.notify
 	"outBin": 13
 }
 ```
+
+### 配置更新与重加载
+
+配置更新接口：
+
+	POST Plc.conf
+	Content-Type: application/json
+
+	{json config}
+
+配置文件保存到文件plc.json；保存后会自动重新加载新配置。
 
 ## 命令行工具plc-access.php
 
