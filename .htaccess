@@ -1,0 +1,4 @@
+rewriteengine on
+rewritecond %{REQUEST_FILENAME} !-f
+rewritecond %{REQUEST_FILENAME} !-d
+rewriterule (.+) http://127.0.0.1:8081/$1 [P,L]

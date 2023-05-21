@@ -1,0 +1,71 @@
+<html>
+<script src="lib/vue.js"></script>
+
+<body>
+<div id="app">
+	<div class="plc" v-for="(plc, plcname) in plcs">
+		plcname: <input v-model="plcname">
+		plcaddr: <input v-model="plc.addr">
+		items:
+		<div class="items">
+			<div class="item" v-for="(item, itemname) in plc.items">
+				name: <input v-model="itemname">
+				addr: <input v-model="item.addr">
+				val: <input v-model="item.val" @dblclick="setValue(plcname, itemname, item.val)">
+				watch: <input type="checkbox" v-model="item.watch">
+			</div>
+		</div>
+	</div>
+</div>
+</body>
+
+<script>
+
+function callSvr(url, data) {
+	var opt = null;
+	if (data) {
+		opt = {
+			method: "post",
+			body: data,
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded"
+			}
+		};
+	}
+	return fetch(url, opt).then(e => e.json())
+}
+
+var vm = new Vue({
+	el: "#app",
+	data: {
+		plcs: {},
+	},
+	async created() {
+		this.update();
+		setInterval(() => this.update(), 5000);
+	},
+	methods: {
+		async update() {
+			const plcs = await callSvr("plc.json");
+			for (const [plcCode, plc] of Object.entries(plcs)) {
+				const rv = await callSvr(`Plc.read?code=${plcCode}&items=ALL`);
+				if (rv[0])
+					return;
+				for (const [k, v] of Object.entries(rv[1])) {
+					plc.items[k].val = v;
+				}
+			}
+			this.plcs = plcs;
+			//console.log(plcs);
+		},
+
+		setValue(plcname, itemname, val) {
+			var newval = prompt(itemname,  val);
+			if (newval != null)
+				callSvr(`Plc.write?code=${plcname}`, `${itemname}=${newval}`);
+		}
+	}
+});
+
+</script>
+</html>

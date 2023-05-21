@@ -58,13 +58,15 @@ TODO: 配置工具
 	sudo ./plcserver.service.sh restart
 	(或sudo systemctl restart plcserver)
 
-运行时可在网页中配置PLC：
+运行时可在网页中配置或监控PLC，需要与Apache一起使用，将目录链接到Apache的主目录，示例：
 
-	http://localhost:8081/conf
+	cd /var/www/html
+	ln -sf /var/www/src/plcserver ./
 
-在网页中查看或修改字段值：
+注意已在.htaccess文件中配置了转发，Apache须打开proxy和rewrite模块。
+打开网页中查看字段值，双击字段值可以修改值：
 
-	http://localhost:8081/plc
+	http://localhost/plcserver/
 
 ## 读、写接口
 
@@ -82,6 +84,8 @@ TODO: 配置工具
 
 根据code和字段名，在plc.json配置文件中查找相应地址并读写。
 如果未指定code, 则取配置中第1个。
+
+特别地，当items设置为ALL时，表示取所有地址，目前用于监控页。
 
 ### 写PLC
 

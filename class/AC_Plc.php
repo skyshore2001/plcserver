@@ -66,17 +66,25 @@ class AC_Plc extends JDApiBase
 	}
 
 	static protected function readItems($plcConf, $items, $plcObj = null) {
-		$items1 = [];
-		foreach ($items as $itemCode) {
-			$found = false;
-			foreach ($plcConf["items"] as $itemCode0 => $item) {
-				if ($itemCode == $itemCode0) {
-					$items1[] = $item["addr"];
-					$found = true;
+		if ($items[0] == 'ALL') {
+			$items = array_keys($plcConf["items"]);
+			$items1 = array_map(function ($item) {
+				return $item["addr"];
+			}, $plcConf["items"]);
+		}
+		else {
+			$items1 = [];
+			foreach ($items as $itemCode) {
+				$found = false;
+				foreach ($plcConf["items"] as $itemCode0 => $item) {
+					if ($itemCode == $itemCode0) {
+						$items1[] = $item["addr"];
+						$found = true;
+					}
 				}
+				if (!$found)
+					jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 			}
-			if (!$found)
-				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
 			$plcObj = self::create($plcConf["addr"]);
