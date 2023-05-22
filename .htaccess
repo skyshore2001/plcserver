@@ -2,3 +2,9 @@ rewriteengine on
 rewritecond %{REQUEST_FILENAME} !-f
 rewritecond %{REQUEST_FILENAME} !-d
 rewriterule (.+) http://127.0.0.1:8081/$1 [P,L]
+
+<FilesMatch "(\.html|\.js|\.css)$">
+Header set Cache-Control "no-cache"
+# bugfix for apache gzip-304-bug: https://bz.apache.org/bugzilla/show_bug.cgi?id=45023
+Header edit ETag "(.*)-gzip" "$1"
+</FilesMatch>
