@@ -31,11 +31,14 @@ th, td {
 </style>
 
 <body>
+<h1>plcserver
+<a href="conf.html" class="hint" target="_blank">配置</a>
+</h1>
 <div id="app">
 	<div class="plc" v-for="(plc, plcname) in plcs">
 		<table class="items">
 			<tr>
-				<th style="width: 200px"><a href="conf.html" target="_blank">Plc={{plcname}}</a></th>
+				<th style="width: 200px">PLC={{plcname}}</th>
 				<th style="width: 200px">{{plc.addr}}</th>
 				<th style="width: 200px">{{plc.dscr}}</th>
 				<th></th>
