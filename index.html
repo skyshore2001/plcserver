@@ -12,12 +12,8 @@ th, td {
 	border: 1px solid #ccc;
 	padding: 0.5em;
 }
-
-.op {
-	margin: 10px 0px;
-}
-button {
-	min-width: 100px;
+.hl {
+	background-color: #ffcccc;
 }
 </style>
 
@@ -34,7 +30,7 @@ button {
 			<tr class="item" v-for="(item, itemname) in plc.items">
 				<td>{{itemname}}</td>
 				<td>{{item.addr}}</td>
-				<td align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
+				<td :class="{hl: item.hl}" align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
 			</tr>
 		</table>
 	</div>
@@ -45,7 +41,7 @@ button {
 var vm = new Vue({
 	el: "#app",
 	data: {
-		plcs: {},
+		plcs: {}, // %{plcname => { addr, dscr?, disabled?, items=%{itemname => {addr, dscr?, disabled?, val?, hl?} }
 	},
 	async created() {
 		this.plcs = await callSvr("plc.json", null, {jdcloud:0});
@@ -57,13 +53,22 @@ var vm = new Vue({
 			for (const [plcname, plc] of Object.entries(this.plcs)) {
 				const rv = await callSvr(makeUrl("Plc.read", {code: plcname, items: "ALL"}), null, {jdcloud: 0});
 				if (!isArray(rv) || rv[0])
-					return;
+					continue;
 				for (const [k, v] of Object.entries(rv[1])) {
 					if (plc.items[k] === undefined) {
 						console.warn(`unknown field ${plcname}.${k}`);
 						continue;
 					}
-					this.$set(plc.items[k], "val", v);
+					var v1 = v.toString();
+					var oldVal = plc.items[k].val;
+					if (oldVal != v1) {
+						// highlight
+						this.$set(plc.items[k], "hl", true);
+						setTimeout(() => {
+							this.$set(plc.items[k], "hl", false);
+						}, 3000);
+					}
+					this.$set(plc.items[k], "val", v1);
 				}
 			}
 		},
