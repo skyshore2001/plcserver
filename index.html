@@ -48,15 +48,15 @@ var vm = new Vue({
 		plcs: {},
 	},
 	async created() {
-		this.plcs = await callSvr("plc.json");
+		this.plcs = await callSvr("plc.json", null, {jdcloud:0});
 		this.update();
 		setInterval(() => this.update(), 5000);
 	},
 	methods: {
 		async update() {
 			for (const [plcname, plc] of Object.entries(this.plcs)) {
-				const rv = await callSvr(`Plc.read?code=${plcname}&items=ALL`);
-				if (rv[0])
+				const rv = await callSvr(makeUrl("Plc.read", {code: plcname, items: "ALL"}), null, {jdcloud: 0});
+				if (!isArray(rv) || rv[0])
 					return;
 				for (const [k, v] of Object.entries(rv[1])) {
 					if (plc.items[k] === undefined) {
@@ -71,7 +71,7 @@ var vm = new Vue({
 		setValue(plcname, itemname, val) {
 			var newval = prompt(itemname,  val);
 			if (newval != null)
-				callSvr(`Plc.write?code=${plcname}`, `${itemname}=${newval}`);
+				callSvr(makeUrl("Plc.write", {code: plcname}), `${itemname}=${newval}`);
 		}
 	}
 });

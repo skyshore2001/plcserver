@@ -146,13 +146,14 @@ async function save(conf)
 		v.items = arr2map(v.items, "name");
 	});
 	console.log(conf1);
-	callSvr("Plc.conf", conf1, {useJson:1});
+	await callSvr("Plc.conf", conf1, {useJson:1});
+	app_alert("保存成功!");
 }
 
 // ====== main ======
 async function main()
 {
-	var conf = await callSvr("plc.json");
+	var conf = await callSvr("plc.json", null, {jdcloud: 0});
 	conf = map2arr(conf, "name", (k, v) => {
 		v.items = map2arr(v.items, "name");
 	});
