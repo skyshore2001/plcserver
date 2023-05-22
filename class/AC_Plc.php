@@ -125,12 +125,20 @@ class AC_Plc extends JDApiBase
 		return $ret;
 	}
 
+	private static function isStringType($type) {
+		return preg_match('/:(char|string)/', $type);
+	}
 	static protected function writeItems($plcConf, $items, $plcObj = null) {
 		$items1 = []; // elem: [addr, value]
 		foreach ($items as $itemCode=>$value) { // code=>value
 			$found = false;
 			foreach ($plcConf["items"] as $itemCode0 => $item) {
 				if ($itemCode == $itemCode0) {
+					if (stripos($item["addr"], '[') !== false) {
+						if (! self::isStringType($item["addr"])) {
+							$value = explode(',', $value);
+						}
+					}
 					$items1[] = [$item["addr"], $value];
 					$found = true;
 				}
