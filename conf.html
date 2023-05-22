@@ -27,6 +27,7 @@ var schema = {
 		type: "object",
 		title: "Plc",
 		headerTemplate: "{{self.name}}",
+		format: "categories",
 		properties: {
 			name: {
 				type: "string",
@@ -36,6 +37,10 @@ var schema = {
 				type: "string",
 				required: true,
 				description: "e.g. <code>s7://127.0.0.1</code>(tcp port 102) <code>modbus://192.168.1.1</code> (tcp port 502)"
+			},
+			dscr: {
+				type: "string",
+				format: "textarea",
 			},
 			items: {
 				type: "array",

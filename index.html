@@ -1,36 +1,53 @@
 <html>
+<title>plcserver</title>
 <script src="lib/vue.js"></script>
 <script src="lib/common.js"></script>
 <style>
 .plc {
 
 }
+.items {
+	width: 100%;
+}
 th {
 	background-color: #f0f0f0;
+	text-align: left;
 }
 th, td {
 	border: 1px solid #ccc;
 	padding: 0.5em;
+	min-width: 100px;
 }
 .hl {
 	background-color: #ffcccc;
+}
+.hint {
+	font-size: 0.7em;
+	color: blue;
 }
 </style>
 
 <body>
 <div id="app">
 	<div class="plc" v-for="(plc, plcname) in plcs">
-		<a href="conf.html" target="_blank">Plc={{plcname}} ({{plc.addr}})</a>
 		<table class="items">
+			<tr>
+				<th style="width: 200px"><a href="conf.html" target="_blank">Plc={{plcname}}</a></th>
+				<th style="width: 200px">{{plc.addr}}</th>
+				<th style="width: 200px">{{plc.dscr}}</th>
+				<th></th>
+			</tr>
 			<tr>
 				<th>变量名</th>
 				<th>地址</th>
-				<th>值 <span style="font-size:0.7em; color:blue">(双击修改)</span></th>
+				<th style="text-align: right">值 <span class="hint">(双击修改)</span></th>
+				<th>备注</th>
 			</tr>
 			<tr class="item" v-for="(item, itemname) in plc.items">
 				<td>{{itemname}}</td>
 				<td>{{item.addr}}</td>
 				<td :class="{hl: item.hl}" align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
+				<td><span class="hint">{{item.dscr}}</span></td>
 			</tr>
 		</table>
 	</div>
