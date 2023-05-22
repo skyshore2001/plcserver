@@ -7,6 +7,35 @@
 <script src="lib/jsoneditor-cn.js"></script>
 <script src="lib/common.js"></script>
 <link rel="stylesheet" href="lib/spectre-scoped.min.css">
+
+<style>
+.spectre .btn {
+	min-width: auto;
+	min-height: auto;
+	border-color: #0088cc;
+	text-align: unset;
+	white-space: unset;
+}
+.spectre .btn.btn-block {
+	height: unset;
+}
+.spectre .btn.btn-primary, .spectre .btn.active, .spectre .btn:active {
+	background-color: #0088cc;
+	border-color: #0088cc;
+}
+.spectre .form-input:focus, .spectre .form-select:focus {
+	border-color: #0088cc;
+}
+.spectre .checkbox {
+	border: unset;
+}
+.spectre .table {
+	white-space: unset;
+}
+.spectre .table td {
+	vertical-align: top;
+}
+</style>
 </head>
 
 <body class="spectre">
@@ -14,7 +43,7 @@
 <button id='submit' class="btn btn-primary" style="margin-left:10px; padding: 5px 10px;">保存配置</button>
 </h1>
 
-<div id='editor_holder'></div>
+<div id='jsonEditor'></div>
 <script>
 // ====== globals ======
 var conf;
@@ -49,7 +78,7 @@ var schema = {
 				items: {
 					type: "object",
 					title: "变量",
-					headerTemplate: "{{self.name}}",
+					// headerTemplate: "{{self.name}}",
 					properties: {
 						name: {
 							type: "string",
@@ -78,6 +107,12 @@ var schema = {
 						disabled: {
 							type: "boolean"
 						}
+					},
+					options: {
+						// 配置headerTemplate
+						onNotify: function (val, isManualChange) {
+							return val.name + (val.watch? ' *': '');
+						},
 					}
 				}
 			},
@@ -165,7 +200,7 @@ async function main()
 	console.log(conf);
 
 	initJsonEditor();
-	var dom = document.getElementById('editor_holder');
+	var dom = document.getElementById('jsonEditor');
 	//dom.classList.add('spectre');
 	var editor = new JSONEditor(dom, {
 		schema: schema,
