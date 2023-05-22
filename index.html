@@ -1,5 +1,8 @@
 <html>
 <title>plcserver</title>
+<!--
+默认刷新频率为5000ms，可通过URL参数tv设置，如 http://localhost/plcserver/?tv=1000
+-->
 <script src="lib/vue.js"></script>
 <script src="lib/common.js"></script>
 <style>
@@ -63,7 +66,7 @@ var vm = new Vue({
 	async created() {
 		this.plcs = await callSvr("plc.json", null, {jdcloud:0});
 		this.update();
-		setInterval(() => this.update(), 5000);
+		setInterval(() => this.update(), (g_args.tv || 5000));
 	},
 	methods: {
 		async update() {
@@ -80,9 +83,14 @@ var vm = new Vue({
 					var oldVal = plc.items[k].val;
 					if (oldVal != v1) {
 						// highlight
-						this.$set(plc.items[k], "hl", true);
+						if (plc.items[k].hl === undefined) {
+							this.$set(plc.items[k], "hl", 1);
+						}
+						else {
+							++ plc.items[k].hl;
+						}
 						setTimeout(() => {
-							this.$set(plc.items[k], "hl", false);
+							-- plc.items[k].hl;
 						}, 3000);
 					}
 					this.$set(plc.items[k], "val", v1);
