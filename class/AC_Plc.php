@@ -47,7 +47,7 @@ class AC_Plc extends JDApiBase
 		unset($plcConf);
 		self::$conf = $conf;
 		self::$tmConf = $tmConf;
-		echo("### load conf: plc.json\n");
+		writeLog("### load conf: plc.json");
 
 		// 部署watch任务
 		foreach ($conf as $plcCode => $plcConf) {
@@ -207,7 +207,7 @@ class AC_Plc extends JDApiBase
 
 	static function create($addr) {
 		$rv = parse_url($addr);
-		$proto = ($rv['schema'] ?: "s7");
+		$proto = ($rv['scheme'] ?: "s7");
 		if (! in_array($proto, ["s7", "modbus"]))
 			jdRet(E_PARAM, "unsupported plc addr protocol: `$proto`", "PLC地址错误: $addr");
 		$addr1 = $rv["host"];
