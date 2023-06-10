@@ -72,22 +72,29 @@ var vm = new Vue({
 		setInterval(() => this.update(), (g_args.tv || 5000));
 	},
 	methods: {
-		async update() {
+		update() {
+			const this_ = this;
 			for (const [plcname, plc] of Object.entries(this.plcs)) {
-				const rv = await callSvr(makeUrl("Plc.read", {code: plcname, items: "ALL"}), null, {jdcloud: 0});
+				const rv = callSvr(makeUrl("Plc.read", {code: plcname, items: "ALL"}), null, {jdcloud: 0});
+				rv.then(function (data) {
+					api_PlcRead(data, plcname, plc);
+				});
+			}
+
+			function api_PlcRead(rv, plcname, plc) {
 				if (!isArray(rv) || rv[0])
-					continue;
+					return;
 				for (const [k, v] of Object.entries(rv[1])) {
 					if (plc.items[k] === undefined) {
 						console.warn(`unknown field ${plcname}.${k}`);
-						continue;
+						return;
 					}
 					var v1 = v.toString();
 					var oldVal = plc.items[k].val;
 					if (oldVal != v1) {
 						// highlight
 						if (plc.items[k].hl === undefined) {
-							this.$set(plc.items[k], "hl", 1);
+							this_.$set(plc.items[k], "hl", 1);
 						}
 						else {
 							++ plc.items[k].hl;
@@ -96,7 +103,7 @@ var vm = new Vue({
 							-- plc.items[k].hl;
 						}, 3000);
 					}
-					this.$set(plc.items[k], "val", v1);
+					this_.$set(plc.items[k], "val", v1);
 				}
 			}
 		},
