@@ -17,7 +17,7 @@
 
 ## 初始化配置
 
-app_fw框架自动包含 $BASE_DIR/php/conf.user.php。
+app_fw框架自动包含 $BASE_DIR/conf.user.php。
 
 项目部署时的配置，一般用于定义环境变量、全局变量等，通常不添加入版本库，在项目实施时手工配置。
 
@@ -259,6 +259,22 @@ $GLOBALS["conf_mssql_translateMysql"] = true;
 $GLOBALS["conf_mssql_useOdbc"] = false;
 
 $GLOBALS["conf_httpCallAsyncPort"] = 80;
+
+/**
+@var conf_slowSqlTime SQL慢查询阈值时间，默认值为1.0(秒).
+@var conf_slowApiTime 慢接口阈值时间，默认值为1.0(秒).
+@var conf_slowHttpCallTime Web调用慢的阈值时间，默认值为1.0(秒).
+
+@key slow.log 慢查询日志
+
+当操作时间超过阈值时间时，会记录到慢查询日志slow.log。
+注意日志时间为SQL完成时的时间，日志时间减去操作时间才是开始时间。因此日志顺序与执行顺序不一定相同。
+*/
+$GLOBALS["conf_slowSqlTime"] = 1.0;
+$GLOBALS["conf_slowApiTime"] = 1.0;
+$GLOBALS["conf_slowHttpCallTime"] = 1.0;
+
+initAppFw();
 // }}}
 
 // load user config
@@ -266,8 +282,15 @@ $userConf = "{$BASE_DIR}/conf.user.php";
 file_exists($userConf) && include_once($userConf);
 
 // ====== functions {{{
-// assert失败中止运行
-assert_options(ASSERT_BAIL, 1);
+function initAppFw()
+{
+	mb_internal_encoding("UTF-8");
+	setlocale(LC_ALL, "zh_CN.UTF-8");
+	umask(2); // 写文件时(如file_put_contents)，默认组可写
+
+	// assert失败中止运行
+	assert_options(ASSERT_BAIL, 1);
+}
 
 // ==== param {{{
 
@@ -1748,7 +1771,7 @@ class DBEnv
 	function __construct($dbtype = null, $db = null, $user = null, $pwd = null) {
 		if ($dbtype) {
 			$this->DBTYPE = $dbtype;
-			assert('$db');
+			assert($db != null);
 			$this->C = [$db, $user, $pwd];
 		}
 		else {
@@ -1770,9 +1793,6 @@ class DBEnv
 	}
 
 	private function initDbType() {
-		mb_internal_encoding("UTF-8");
-		setlocale(LC_ALL, "zh_CN.UTF-8");
-
 		$this->DBTYPE = getenv("P_DBTYPE");
 		$DB = getenv("P_DB") ?: "localhost/jdcloud";
 		$DBCRED = getenv("P_DBCRED") ?: "ZGVtbzpkZW1vMTIz"; // base64({user}:{pwd}), default: demo:demo123
@@ -1935,7 +1955,7 @@ class DBEnv
 			$DBH->amendLog("cnt=". count($rows));
 			$allRows[] = $rows;
 			// bugfix:sqlite不支持nextRowSet
-			if ($this->DBTYPE == "sqlite")
+			if (! $DBH->supportNextRowSet())
 				break;
 		}
 		while ($sth->nextRowSet());
@@ -2544,6 +2564,10 @@ class JDPDO extends PDO
 	function acceptAliasInGroupBy() {
 		return true;
 	}
+	function supportNextRowSet() {
+		return true;
+	}
+
 	// end
 
 	function __construct($dsn, $user = null, $pwd = null)
@@ -2605,13 +2629,18 @@ class JDPDO extends PDO
 	{
 		$this->filterSql($sql);
 		$this->addLog($sql);
-		return parent::query($sql, $fetchMode);
+		$t0 = microtime(true);
+		$rv =parent::query($sql, $fetchMode);
+		$this->checkTime($t0, $sql);
+		return $rv;
 	}
 	function exec($sql, $getInsertId = false)
 	{
 		$this->filterSql($sql);
 		$this->addLog($sql);
+		$t0 = microtime(true);
 		$rv = parent::exec($sql);
+		$this->checkTime($t0, $sql);
 		if ($getInsertId)
 			$rv = (int)$this->lastInsertId();
 
@@ -2624,10 +2653,22 @@ class JDPDO extends PDO
 		$this->addLog($sql);
 		return parent::prepare($sql, $opts);
 	}
+
+	// t0: start time
+	protected function checkTime($t0, $sql) {
+		$t = microtime(true) - $t0;
+		if ($t > getConf("conf_slowSqlTime")) {
+			$t = round($t, 2);
+			logit("-- slow sql: time={$t}s\n$sql\n", "slow");
+		}
+	}
 }
 
 class JDPDO_sqlite extends JDPDO
 {
+	function supportNextRowSet() {
+		return false;
+	}
 }
 
 class JDPDO_mysql extends JDPDO
@@ -2706,6 +2747,9 @@ class JDPDO_oracle extends JDPDO
 	function exec($sql, $getInsertId = false) {
 		// NOTE: oracle DO NOT support getLastId(). dont use dbInsert() to get id!
 		return parent::exec($sql, false);
+	}
+	function supportNextRowSet() {
+		return false;
 	}
 }
 

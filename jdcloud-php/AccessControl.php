@@ -792,7 +792,7 @@ subobj: { name => {sql, default?=false, wantOne?=0} } 指定SQL语句，查询�
 例如典型的主、子表场景：一次查询不超过100个订单（分页<100），一个订单带有最多几十行明细，或最多几十条订单日志。
 不可用于总查询返回（主表项数乘以子表项数）超过千行的场景，因为会丢数据。虽可以通过调节子表的maxPageSz解决，但并不建议这样做。
 
-query接口的子查询默认是不分页的，即返回所有子对象数据（实现时是设置pagesz=-1，所有主表项的子对象数加起来最多返回1000条，所以可能会造成子对象丢失问题）。
+query接口的子查询默认是不分页的，即返回所有子对象数据（实现时是设置pagesz=-1，所有主表项的子对象数加起来默认最多10000条，所以可能会造成子对象丢失问题）。
 即使指定wantOne也会查询出所有数据后返回首行，若指定pagesz参数则会报错。
 
 这是由于query接口的子查询使用了查询优化，对所有主表项一次查询返回所有子对象。
@@ -929,21 +929,19 @@ query接口子查询示例：
 
 ### 最大每页数据条数
 
-@fn AccessControl::getMaxPageSz()  (for query) 取最大每页数据条数。为非负整数。
-@var AccessControl::$maxPageSz ?= 1000 (for query) 指定最大每页数据条数。值为负数表示取PAGE_SZ_LIMIT值.
+@var PAGE_SZ_LIMIT =10000 默认每页最大数据条数
 
-前端通过 {obj}.query(pagesz)来指定每页返回多少条数据，缺省是20条，最高不可超过100条。当指定为负数时，表示按最大允许值=min($maxPageSz, PAGE_SZ_LIMIT)返回。
-PAGE_SZ_LIMIT目前定为10000条。如果还不够，一定是应用设计有问题。
+@fn AccessControl::getMaxPageSz()  (for query) 取每页最大数据条数。为非负整数。
+@var AccessControl::$maxPageSz ?= -1 (for query) 指定某对象的每页最大数据条数。默认值为-1，表示使用PAGE_SZ_LIMIT值即10000。
 
-如果想返回每页超过100条数据，必须在后端设置，如：
+前端通过 {obj}.query(pagesz)来指定每页返回多少条数据，缺省是20条，最高不可超过$maxPageSz条。当指定为负数时，表示按$maxPageSz条返回。
+（旧版maxPageSz不允许超过PAGE_SZ_LIMIT，v6.1起不限制）
 
 	class MyObj extends AccessControl
 	{
-		protected $maxPageSz = 2000; // 最大允许返回2000条
+		protected $maxPageSz = 20000; // 最大允许返回20000条
 		// protected $maxPageSz = -1; // 最大允许返回 PAGE_SZ_LIMIT 条
 	}
-
-@var PAGE_SZ_LIMIT =10000
 
 ### 虚拟表和视图
 
@@ -1204,6 +1202,28 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 类似地还有batchDel操作。显然，batchSet/batchDel逐条记录执行，会比setIf/delIf慢很多，但好处是可重用单条记录更新、删除的业务逻辑。
 
 注意：筋斗云web管理端上，多选或按Ctrl键进行的批量操作，用的是setIf/delIf。
+
+## 连接第三方数据库
+
+如果是同一个数据库服务实例中的其它数据库，是可以直接访问的，只要访问时带上数据库名前缀即可。如：
+
+	class AC2_Data extends AccessControl
+	{
+		protected $table = "fiss.aiobjectdata";
+	}
+
+如果是在其它数据库服务器上，则可以通过修改env来实现，示例：
+
+	class AC2_Data extends AccessControl
+	{
+		protected $table = "fiss.aiobjectdata";
+		protected function onInit() {
+			$db = "mysql:host=10.80.140.32;port=3306;dbname=fiss"; // 也可以连oracle, mssql等各种其它类型数据库，参考DBEnv
+			$this->env = new DBEnv("mysql", $db, "root", "123456");
+			// 这里是直接打开新连接的，如果一次接口调用中访问多次，则应全局缓存该连接
+		}
+	}
+
 */
 
 # ====== functions {{{
@@ -1234,7 +1254,7 @@ class AccessControl extends JDApiBase
 	protected $defaultRes = "*"; // 缺省为 "t0.*" 加  default=true的虚拟字段
 	protected $defaultSort = "t0.id";
 	# for query
-	protected $maxPageSz = 1000;
+	protected $maxPageSz = -1;
 
 	# for get/query
 	# virtual columns
@@ -1595,7 +1615,7 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 	}
 	final public function getMaxPageSz()
 	{
-		return $this->maxPageSz <0? PAGE_SZ_LIMIT: min($this->maxPageSz, PAGE_SZ_LIMIT);
+		return $this->maxPageSz <0? PAGE_SZ_LIMIT: $this->maxPageSz;
 	}
 
 	// 用于onHandleRow或enumFields中，从结果中取指定列数据，避免直接用$row[$col]，因为字段有可能用的是别名。
@@ -1887,7 +1907,9 @@ param函数以"id"类型符来支持这种伪uuid类型，如：
 				else {
 					if ($isAll)
 						jdRet(E_PARAM, "`$col` MUST be virtual column when `res` has `*`", "虚拟字段未定义: $col");
-					$col = "t0." . $col;
+					// 允许"null f1"占位字段
+					if ($col !== "null")
+						$col = "t0." . $col;
 					$col1 = $col;
 					if (isset($alias)) {
 						$col1 .= " {$alias}";
@@ -2415,7 +2437,7 @@ uniKey可以指定多个字段，以逗号分隔即可，常用于关联表，�
 			unset($_POST["id"]);
 		}
 		$this->handleSubObjForAddSet();
-		$this->id = dbInsert($this->table, $_POST);
+		$this->id = $this->env->dbInsert($this->table, $_POST);
 		$ret = $this->id;
 		$this->after($ret); // bugfix: 子表添加是在after中执行的，先执行after以免下面指定res查不出子表
 
@@ -2561,7 +2583,7 @@ uniKey以"!"结尾为更新模式，即必须匹配到记录，否则报错，�
 
 			if ($rv["condSql"]) {
 				$sql = sprintf("SELECT t0.id FROM %s WHERE t0.id=%s AND %s", $rv["tblSql"], $this->id, $rv["condSql"]);
-				if (queryOne($sql) === false)
+				if ($this->env->queryOne($sql) === false)
 					jdRet(E_PARAM, "bad {$this->table}.id=" . $this->id . ". Check addCond in `onQuery`.", "操作对象不存在或无权限修改");
 			}
 		}
@@ -2578,7 +2600,7 @@ uniKey以"!"结尾为更新模式，即必须匹配到记录，否则报错，�
 		$this->validate();
 		$this->handleSubObjForAddSet();
 
-		$cnt = dbUpdate($this->table, $_POST, $this->id);
+		$cnt = $this->env->dbUpdate($this->table, $_POST, $this->id);
 		return "OK";
 	}
 
@@ -2640,6 +2662,7 @@ uniKey以"!"结尾为更新模式，即必须匹配到记录，否则报错，�
 					foreach ($subobjList as $subobj) {
 						$subid = $subobj["id"];
 						if ($subid && $this->ac == "add") {
+							$subid0 = $subid;
 							$subid = null;
 							unset($subobj["id"]);
 						}
@@ -2664,7 +2687,11 @@ uniKey以"!"结尾为更新模式，即必须匹配到记录，否则报错，�
 						}
 						else {
 							$subobj[$relatedKey] = $relatedValue;
-							$acObj->callSvc($objName, "add", null, $subobj);
+							$subid = $acObj->callSvc($objName, "add", null, $subobj);
+							if (isset($subid0)) {
+								$GLOBALS["idMap_$objName"][$subid0] = $subid;
+								unset($subid0);
+							}
 						}
 					}
 				};
@@ -2741,7 +2768,7 @@ FROM ($sql) t0";
 		$hasFields = (count($this->sqlConf["res"]) > 0);
 		if ($hasFields) {
 			$sql = $this->genQuerySql();
-			$ret = queryOne($sql, true);
+			$ret = $this->env->queryOne($sql, true);
 			if ($ret === false) 
 				jdRet(E_PARAM, "not found `{$this->table}.id`=`{$this->id}`");
 		}
@@ -2882,7 +2909,7 @@ FROM ($sql) t0";
 			else {
 				$cntSql = "SELECT COUNT(*) FROM ($sql) t0";
 			}
-			$totalCnt = queryOne($cntSql);
+			$totalCnt = $this->env->queryOne($cntSql);
 		}
 		if ($orderSql)
 			$sql .= "\nORDER BY " . $orderSql;
@@ -2908,7 +2935,7 @@ FROM ($sql) t0";
 			$this->handleExportToOutfile($sql);
 			jdRet();
 		}
-		$ret = queryAll($sql, true);
+		$ret = $this->env->queryAll($sql, true);
 		if ($ret === false)
 			$ret = [];
 
@@ -3203,7 +3230,7 @@ qsearch的格式是`字段1,字符2,...:查询内容`(使用英文逗号及冒�
 		$sql = $this->delField === null
 			? sprintf("DELETE FROM %s WHERE id=%d", $this->table, $this->id)
 			: sprintf("UPDATE %s SET %s=1 WHERE id=%s", $this->table, $this->delField, $this->id);
-		$cnt = execOne($sql);
+		$cnt = $this->env->execOne($sql);
 		if (param('force')!=1 && $cnt != 1)
 			jdRet(E_PARAM, "del: not found {$this->table}.id={$this->id}");
 		return "OK";
@@ -3306,7 +3333,7 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 				$kv["t0.$k"] = $v;
 			}
 		}
-		$cnt = dbUpdate($rv["tblSql"], $kv, $rv["condSql"]);
+		$cnt = $this->env->dbUpdate($rv["tblSql"], $kv, $rv["condSql"]);
 		return $cnt;
 	}
 
@@ -3387,15 +3414,121 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 		$rv = $this->genCondSql();
 		if ($this->delField === null) {
 			$sql = sprintf("DELETE t0 FROM %s WHERE %s", $rv["tblSql"], $rv["condSql"]);
-			$cnt = execOne($sql);
+			$cnt = $this->env->execOne($sql);
 		}
 		else {
 			$cond = "{$rv["condSql"]} AND {$this->delField}=0";
-			$cnt = dbUpdate($rv["tblSql"], [
+			$cnt = $this->env->dbUpdate($rv["tblSql"], [
 				"t0.{$this->delField}" => 1
 			], $cond);
 		}
 		return $cnt;
+	}
+
+/**
+@fn api_dup($opt)
+
+实现对象复制接口，支持一次复制多个。参数id可以是一个整数，或以逗号分隔的多个整数。
+
+	Obj.dup(id) -> [newId1, ...]
+
+支持定制，示例：
+
+	function api_dup() {
+		$this->dupObjOpt = [
+			// 在get请求前，已自动生成了get请求参数，已自动添加了子表项，这里可修改默认请求参数
+			"beforeGet" => function (&$param) {
+			},
+			// 在add请求前，可修改待添加的数据。如果不指定，默认是将code/name字段自动加随机数。注意原数据的id已删除。
+			"beforeAdd" => function (&$data) {
+				$data["code"] .= '-' . rand(1000,10000);
+				$data["name"] .= '-' . rand(1000,10000);
+			},
+		];
+		return parent::api_dup();
+	}
+
+特别地，如果涉及子表间引用，比如Item有子表specName和specValue，但specValue中有字段specNameId是引用SpecName表的，这种情况就需要将引用旧Id修正为新添加的Id。
+可以在子表的onValidateId中调用fixRefId函数来实现。
+
+	class AC2_SpecValue 
+	{
+		protected function onValidate()
+		{
+			if ($this->ac == 'add') {
+				// 修正Item.dup时的错误关联键specNameId，它指向SpecName中的id。
+				// 字段值可以是一个或多个（以逗号分隔）Id，如100, "100,101"均可。
+				self::fixRefId($_POST["specNameId"], "SpecName");
+			}
+		}
+	}
+
+*/
+	function api_dup() {
+		$idList = mparam("id/i+");
+		$newIdList = [];
+		foreach ($idList as $id) {
+			$newIdList[] = $this->dupObj($id);
+		}
+		return $newIdList;
+	}
+
+	private function dupObj($id) {
+		$param = [
+			"id" => $id,
+			"res" => "t0.*"
+		];
+		foreach ($this->subobj as $k=>$v) {
+			if ($v["wantOne"] || $v["notForAdd"])
+				continue;
+			if (strpos($v["cond"], "{id}") === false && strpos($v["cond"], "%d") === false)
+				continue;
+			addToStr($param["res"], $k);
+			$param["param_$k"] = ["res" => "t0.*", "orderby" => "id"];
+		}
+		$opt = $this->dupObjOpt;
+		if ($opt && is_callable($opt["beforeGet"])) {
+			$opt["beforeGet"]($param);
+		}
+		/* example:
+		$t0 = $this->callSvc(null, "get", [
+			"id" => $id,
+			"res" => "t0.*,specName,specValue",
+			"param_specName" => ["res" => "t0.*", "orderby" => "id"],
+			"param_specValue" => ["res" => "t0.*", "orderby" => "id"],
+		]);
+		*/
+		$t0 = $this->callSvc(null, "get", $param);
+		unset($t0["id"]);
+		if ($opt && is_callable($opt["beforeAdd"])) {
+			$opt["beforeAdd"]($t0);
+		}
+		else {
+			if (isset($t0["code"]))
+				$t0["code"] .= '-' . rand(1000,10000);
+			if (isset($t0["name"]))
+				$t0["name"] .= '-' . rand(1000,10000);
+		}
+		$newId = $this->callSvc(null, "add", null, $t0);
+		return $newId;
+	}
+
+	static function fixRefId(&$var, $refTableName) {
+		if (!$var)
+			return;
+		$map = $GLOBALS["idMap_$refTableName"];
+		if (!is_array($map))
+			return;
+		if (is_int($var)) {
+			if (array_key_exists($var, $map))
+				$var = $map[$var];
+		}
+		else {
+			$arr = array_map(function ($e) use ($map) {
+				return array_key_exists($e, $map)? $map[$e]: $e;
+			}, explode(',', $var));
+			$var = join(',', $arr);
+		}
 	}
 
 /**
@@ -3701,7 +3834,7 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 				}
 				else {
 					$sql1 = sprintf($opt["sql"], $id1); # e.g. "select * from OrderItem where orderId=%d"
-					$ret1 = queryAll($sql1, true);
+					$ret1 = $this->env->queryAll($sql1, true);
 				}
 				if (@$opt["wantOne"]) {
 					if ((int)$opt["wantOne"] === 2) { // 值为2时，合并到主表
@@ -3778,7 +3911,7 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 						// => "select status, count(*) cnt, orderId id_ FROM Task WHERE orderId IN (...) group by id_, status"
 						$sql = preg_replace('/group by/i', "$0 id_, ", $sql);
 					}
-					$ret1 = queryAll($sql, true);
+					$ret1 = $this->env->queryAll($sql, true);
 				}
 			}
 			if ($joinField === null) {
@@ -4157,7 +4290,7 @@ function KVtoCond($k, $v)
 		$f = date("Ymd_His") . '.txt';
 		$cmd = "$sql into outfile '$BASE_DIR/$dir/$f'";
 		logit("export to outfile: $cmd");
-		execOne($cmd);
+		$this->env->execOne($cmd);
 
 		$this->header("Content-Type", "text/plain; charset=UTF-8");
 		$this->header("Content-Disposition", "attachment;filename=$f");

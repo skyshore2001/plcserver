@@ -442,6 +442,18 @@ global $X_RET_STR;
 		return "<xml><code>$ret[0]</code><data>$ret[1]</data></xml>";
 	};
 
+@var retfn 通用URL参数，指定返回样式
+
+筋斗云默认返回样式是`[code, data]`，可通过指定URL参数retfn来修改：
+
+- retfn=obj: 成功返回{code:0,data,debug?}, 失败返回{code:非0,message,debug?}
+- retfn=raw: 与下面指定URL参数_raw=1或2相同
+- retfn=xml: 字段名与retfn=obj相同，以xml格式返回。
+
+如果需要扩展某种返回样式如xxx1，只需要定义下面函数，然后调用时指定参数`retfn=xxx1`：
+
+	function retfn_xxx1($ret, $env) {}
+
 @var _raw 通用URL参数，只返回内容
 
 如果有URL参数`_raw=1`，则结果不封装为`[code, data]`形式，而是直接返回data. 示例：
@@ -1251,6 +1263,10 @@ class ApiLog
 	public $batchAc; // new ac for batch
 	public $updateLog; // 可定制ApiLog记录
 
+	public $logReqLen = 2000;
+	public $logResLen = 200;
+	public $logResErrLen = 2000;
+
 /**
 @var ApiLog::$lastId
 
@@ -1262,13 +1278,21 @@ class ApiLog
 
 e.g. 修改ApiLog要记录的ac:
 
-	ApiLog::$instance->batchAc = "async:$f";
+	@ApiLog::$instance->batchAc = "async:$f";
+
+加@抑制错误, 因为当Conf::enableApiLog=0时不记录ApiLog, 此时$instance为空会出现报警或错误.
 
 (v6.1) 可定制ApiLog记录，比如att接口中可指定
 
-	ApiLog::$instance->updateLog = ["res"=>"1.jpg", "ressz" => filesize("1.jpg")];
+	@ApiLog::$instance->updateLog = ["res"=>"1.jpg", "ressz" => filesize("1.jpg")];
 
-ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200字节，出错时记录2000字节。
+ApiLog中, req字段会记录url请求参数和post请求参数各2000字节;
+res字段会记录返回数据200字节(出错时记录2000字节). 
+必要时可以对某个webapi记录多一些返回内容, 可以在api实现中指定:
+
+	@ApiLog::$instance->logResLen = 2000; // res最多记录2000
+	(还有logReqLen和logResErrLen对应req记录和res出错记录, 默认都是2000)
+
 */
 	static $instance;
 
@@ -1281,7 +1305,7 @@ ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200�
 	{
 		if (is_string($var)) {
 			$var = preg_replace('/\s+/', " ", $var);
-			if (strlen($var) > $maxLength)
+			if ($maxLength > 0 && strlen($var) > $maxLength)
 				$var = mb_substr($var, 0, $maxLength) . "...";
 			return $var;
 		}
@@ -1297,7 +1321,7 @@ ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200�
 			if ($klen > $maxKeyLen)
 				return mb_substr($k, 0, $maxKeyLen) . "...";
 			$len = strlen($s);
-			if ($len >= $maxLength) {
+			if ($maxLength > 0 && $len >= $maxLength) {
 				$s .= "$k=...";
 				break;
 			}
@@ -1334,14 +1358,14 @@ ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200�
 		$env = $this->env;
 		$this->startTm = $env->_SERVER("REQUEST_TIME_FLOAT") ?: microtime(true);
 
-		$content = $this->myVarExport($env->_GET, 2000);
+		$content = $this->myVarExport($env->_GET, $this->logReqLen);
 		$ct = getContentType($env);
 		if (! preg_match('/x-www-form-urlencoded|form-data/i', $ct)) {
 			$post = getHttpInput($env);
-			$content2 = $this->myVarExport($post, 2000);
+			$content2 = $this->myVarExport($post, $this->logReqLen);
 		}
 		else {
-			$content2 = $this->myVarExport($env->_POST, 2000);
+			$content2 = $this->myVarExport($env->_POST, $this->logReqLen);
 		}
 		if ($content2 != "")
 			$content .= ";\n" . $content2;
@@ -1385,10 +1409,11 @@ ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200�
 		// 不记日志的情况
 		if (!$this->id && (Conf::$enableApiLog == 0 || (Conf::$enableApiLog == 2 && $ret[0] == 0)))
 			return;
-		$iv = sprintf("%.0f", (microtime(true) - $this->startTm) * 1000); // ms
+		$t = microtime(true) - $this->startTm;
+		$iv = sprintf("%.0f", $t * 1000); // ms
 		if ($X_RET_STR == null)
 			$X_RET_STR = jsonEncode($ret, $env->TEST_MODE);
-		$logLen = $ret[0] !== 0? 2000: 200;
+		$logLen = $ret[0] !== 0? $this->logResErrLen: $this->logResLen;
 		$content = $this->myVarExport($X_RET_STR, $logLen);
 		$batchAc = $this->batchAc;
 		if ($batchAc && mb_strlen($this->batchAc)>50) {
@@ -1414,6 +1439,11 @@ ApiLog请求内容记录2000字节，响应内容res在成功调用时记录200�
 		else {
 			$this->id = $env->dbInsert("ApiLog", $this->log);
 			self::$lastId = $this->id;
+		}
+		if ($t > getConf("conf_slowApiTime")) {
+			$ac = $batchAc ?: $this->log["ac"];
+			$t1 = round($t, 2);
+			logit("slow api call #{$this->id}: $ac, time={$t1}s", true, "slow");
 		}
 // 		$logStr = "=== id={$this->logId} t={$iv} >>>$content<<<\n";
 	}
@@ -2616,7 +2646,7 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			}
 		}
 		$method = $this->_SERVER("REQUEST_METHOD");
-		if ($method === "OPTIONS")
+		if ($method === "OPTIONS" || $method === "HEAD")
 			exit();
 
 		// supportJson: 支持POST为json格式
@@ -2958,20 +2988,19 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 			return;
 		}
 
-		global $X_RET_FN;
 		if (! $data instanceof DbExpr) {
-			if (is_callable(@$X_RET_FN) && !$this->param("jdcloud")) {
-				$ret1 = $X_RET_FN($ret, $this);
+			$retfn = $this->_GET["retfn"] ?: $GLOBALS["X_RET_FN"];
+			if (is_string($retfn)) {
+				$retfn = "retfn_$retfn";
+			}
+			if ($this->_GET["_raw"]) { // 兼容原_raw=1/2参数
+				$retfn = "retfn_raw";
+			}
+			if (is_callable($retfn) && !$this->param("jdcloud")) {
+				$ret1 = $retfn($ret, $this);
 				if ($ret1 === false)
 					return;
 				$ret = $ret1;
-			}
-			else if ($this->_GET["_raw"]) {
-				$ret = $ret[1];
-				if ($this->_GET["_raw"] == 2) {
-					if (is_array($ret))
-						$ret = join("\t", $ret);
-				}
 			}
 
 			if (is_scalar($ret)) {
@@ -3342,6 +3371,48 @@ $param或$postParam为null时，与空数组`[]`等价。
 		return $ret;
 	}
 } /* JDEnv */
+
+function retfn_obj($ret, $env) {
+	$ret1 = ["code" => $ret[0]];
+	if ($ret[0] == 0) {
+		$ret1["data"] = $ret[1];
+	}
+	else {
+		$ret1["message"] = $ret[1];
+	}
+	if (count($ret) > 2) {
+		if ($env->TEST_MODE) {
+			array_splice($ret, 0, 2);
+			$ret1["debug" ] = $ret;
+		}
+		else if ($ret[0]) {
+			$ret1["debug" ] = $ret[2];
+		}
+	}
+	return $ret1;
+}
+function retfn_raw($ret, $env) {
+	$r = $ret[1];
+	if ($env->_GET["_raw"] == 2) {
+		if (is_array($r))
+			$r = join("\t", $r);
+	}
+	return $r;
+}
+function retfn_xml($ret, $env) {
+	$env->header("Content-Type", "application/xml; charset=UTF-8");
+	$ret1 = ["code" => $ret[0]];
+	if ($ret[0] == 0) {
+		$ret1["data"] = $ret[1];
+	}
+	else {
+		$ret1["message"] = $ret[1];
+		if (count($ret) > 2)
+			$ret1["debug"] = $ret[2];
+	}
+	return SimpleXml::writeXml($ret1, "ret");
+}
+
 
 /*
 Bug: session_start doesn't create session
