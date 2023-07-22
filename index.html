@@ -50,7 +50,7 @@ th, td {
 				<th>备注</th>
 			</tr>
 			<tr class="item" v-for="(item, itemname) in plc.items">
-				<td>{{itemname}}</td>
+				<td>{{itemname}}<span style="color:red" v-if="item.watch">*</span></td>
 				<td>{{item.addr}}</td>
 				<td :class="{hl: item.hl}" align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
 				<td><span class="hint">{{item.dscr}}</span></td>

@@ -153,14 +153,17 @@ class AC_Plc extends JDApiBase
 	}
 
 	static protected function handleWatchItems($plcConf, $watchItems) {
-		if (! $plcConf['notifyUrl'])
-			jdRet(E_SERVER, "require plc.notifyUrl for watch items", "PLC配置错误");
 		$oldValues = [];
 		$itemAddrList = [];
 		$itemCodeList = [];
 		foreach ($watchItems as $code=>$e) {
 			$itemAddrList[] = $e['addr'];
 			$itemCodeList[] = $code;
+
+			@$url = $e['notifyUrl'] ?: $plcConf['notifyUrl'];
+			if (! $url) {
+				writeLog("*** error: require notifyUrl for watch item: $code");
+			}
 		}
 
 		self::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
@@ -182,9 +185,11 @@ class AC_Plc extends JDApiBase
 						$res = self::readItems($plcConf, $watch, $plcObj);
 						$post += $res;
 					}
-					$url = $plcConf['notifyUrl'];
-					writeLog("!!! notify $url: " . jsonEncode($post) ."\n");
-					httpCall($url, $post);
+					@$url = $watchItems[$code]['notifyUrl'] ?: $plcConf['notifyUrl'];
+					if ($url) {
+						writeLog("!!! notify $url: " . jsonEncode($post));
+						httpCall($url, $post);
+					}
 				}
 			}
 		});
