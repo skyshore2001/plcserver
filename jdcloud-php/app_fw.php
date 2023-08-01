@@ -2625,7 +2625,8 @@ class JDPDO extends PDO
 		}, $sql);
 	}
 
-	function query($sql, $fetchMode=0)
+	#[\ReturnTypeWillChange]
+	function query($sql, $fetchMode=0, ...$fetchModeArgs)
 	{
 		$this->filterSql($sql);
 		$this->addLog($sql);
@@ -2634,6 +2635,7 @@ class JDPDO extends PDO
 		$this->checkTime($t0, $sql);
 		return $rv;
 	}
+	#[\ReturnTypeWillChange]
 	function exec($sql, $getInsertId = false)
 	{
 		$this->filterSql($sql);
@@ -2648,6 +2650,7 @@ class JDPDO extends PDO
 			$this->amendLog($getInsertId? "new id=$rv": "cnt=$rv");
 		return $rv;
 	}
+	#[\ReturnTypeWillChange]
 	function prepare($sql, $opts=[])
 	{
 		$this->addLog($sql);
@@ -2708,6 +2711,7 @@ class JDPDO_mssql extends JDPDO
 		}
 	}
 
+	#[\ReturnTypeWillChange]
 	function lastInsertId($seqName = null) {
 		if (! $GLOBALS["conf_mssql_useOdbc"])
 			return PDO::lastInsertId($seqName);
@@ -2720,7 +2724,7 @@ class JDPDO_mssql extends JDPDO
 		return $row[0];
 	}
 
-	function query($s, $fetchMode=0) {
+	function query($s, $fetchMode=0, ...$args) {
 		if ($GLOBALS["conf_mssql_translateMysql"])
 			MssqlCompatible::translateMysqlToMssql($s);
 	    return parent::query($s, $fetchMode);

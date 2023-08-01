@@ -102,9 +102,14 @@ $server->on('Message', function ($ws, $frame) {
 $server->on('WorkerStart', function ($server, $workerId) {
 	swoole_ignore_error(1004); // send but session is closed
 	swoole_ignore_error(1005); // end but session is closed
-	writeLog("=== worker $workerId starts. master_pid={$server->master_pid}, manager_pid={$server->manager_pid}, worker_pid={$server->worker_pid}");
-	// TODO: quit server if exception or fatal error. now write to stdout/jdserver.log
 	require("api.php");
+	$server->jdInitDone = true;
+	writeLog("=== worker $workerId starts. master_pid={$server->master_pid}, manager_pid={$server->manager_pid}, worker_pid={$server->worker_pid}");
+});
+
+$server->on('WorkerError', function ($server, $worker_id, $worker_pid, $exit_code, $signal) {
+	if (!isset($server->jdInitDone)) // WorkerStart发生了Fatal Error致命错误
+		$server->shutdown();
 });
 
 $server->on('Request', function ($req, $res) {
@@ -161,7 +166,7 @@ function writeLog($s)
 {
 	if (is_array($s))
 		$s = var_export($s, true);
-	$s = "=== REQ at [".strftime("%Y/%m/%d %H:%M:%S",time())."] " . $s . "\n";
+	$s = "=== REQ at [".date("Y-m-d H:i:s")."] " . $s . "\n";
 	echo($s);
 }
 
