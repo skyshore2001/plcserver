@@ -193,7 +193,7 @@ async function save(conf)
 // ====== main ======
 async function main()
 {
-	var conf = await callSvr("plc.json", null, {jdcloud: 0});
+	var conf = await callSvr("plc.json", null, {defVal:{}, jdcloud: 0});
 	conf = map2arr(conf, "name", (k, v) => {
 		v.items = map2arr(v.items, "name");
 	});

@@ -67,7 +67,7 @@ var vm = new Vue({
 		plcs: {}, // %{plcname => { addr, dscr?, disabled?, items=%{itemname => {addr, dscr?, disabled?, val?, hl?} }
 	},
 	async created() {
-		this.plcs = await callSvr("plc.json", null, {jdcloud:0});
+		this.plcs = await callSvr("plc.json", null, {defVal:{}, jdcloud:0});
 		this.update();
 		setInterval(() => this.update(), (g_args.tv || 5000));
 	},
