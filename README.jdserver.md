@@ -338,6 +338,12 @@ jdserver与jdcloud共用配置文件conf.user.php。它专用的配置项有：
 
 修改会记录到日志中。
 
+## jdserver重启
+
+	reload
+
+当业务代码修改后，可调用该接口平滑重启。
+
 ## jdserver插件
 
 jdserver设计为支持多应用共用，支持各应用定制插件并安装。
@@ -368,7 +374,15 @@ jdserver默认会处理websocket客户端发送中的ac=init/push消息，通过
 
 注意：push或message事件后必须加上app名，即只能处理指定app的事件。
 
-注意：修改插件源码后需要重启jdserver:
+注意：修改插件源码后需要reload服务器，调用reload接口：
+
+	curl http://localhost:8081/reload
+
+或直接重启jdserver:
 
 	sudo ./jdserver.service.sh restart
 
+## 静态网站
+
+支持直接打开主目录下的静态页面，如html/js/css/图片等。
+访问URL根目录"/"时，自动使用index.html

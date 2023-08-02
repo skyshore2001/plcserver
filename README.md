@@ -15,23 +15,25 @@ jdserver的消息推送与任务调度服务保留不变。
 ## 安装
 
 安装swoole: 
-生产环境使用centos7，可使用预编译好的包：
+生产环境使用ubuntu20以上，使用预编译好的模块：
 
-	wget https://oliveche.com/app/tool/swoole-4.8.8-php74-centos7-lj.xz
-	sudo tar -C /opt -axf swoole-4.8.8-php74-centos7-lj.xz
-	(会创建目录 /opt/php74)
-	(加个swoole链接指向php)
-	sudo ln -sf /opt/php74/bin/php /usr/bin/swoole
-
-开发环境可使用windows 10上的wsl，使用ubuntu20上的编译好的php74模块：
-
-	wget https://oliveche.com/app/tool/swoole-4.8.8-ubuntu20-php74.tgz
+	wget https://yibo.ltd/app/tool/swoole-4.8.8-ubuntu20-php74.tgz
 	sudo tar -C /usr/lib/php/20190902 -axf swoole-4.8.8-ubuntu20-php74.tgz
 	(创建swoole.so)
 
 在/etc/php/7.4/cli/conf.d目录下创建20-swoole.ini:
 
 	extension=swoole.so
+
+也支持centos7以上，可使用预编译好的包：
+
+	wget https://yibo.ltd/app/tool/swoole-4.8.8-php74-centos7-lj.xz
+	sudo tar -C /opt -axf swoole-4.8.8-php74-centos7-lj.xz
+	(会创建目录 /opt/php74)
+	(加个swoole链接指向php)
+	sudo ln -sf /opt/php74/bin/php /usr/bin/swoole
+
+Windows开发环境可使用[swoole-cli](https://www.swoole.com/download)下载二进制发行包；也可以使用windows 10上的wsl，运行ubuntu20并使用预编译好的php74-swoole模块。
 
 ## 配置与运行
 
@@ -60,12 +62,16 @@ jdserver的消息推送与任务调度服务保留不变。
 	sudo ./plcserver.service.sh restart
 	(或sudo systemctl restart plcserver)
 
-运行时可在网页中配置或监控PLC，需要与Apache一起使用，将目录链接到Apache的主目录，示例：
+运行时可在网页中配置或监控PLC：
+
+	http://localhost:8081/
+
+也可与Apache一起使用，将目录链接到Apache的主目录，示例：
 
 	cd /var/www/html
 	ln -sf /var/www/src/plcserver ./
 
-注意已在.htaccess文件中配置了转发，Apache须打开proxy和rewrite模块。
+注意已在.htaccess文件中配置了转发，Apache须打开proxy和rewrite模块，无须其它额外配置。
 
 打开Web监控页，可查看各字段值，双击字段值可以修改值：
 
@@ -83,25 +89,48 @@ jdserver的消息推送与任务调度服务保留不变。
 
 ### 读PLC
 
-	Plc.read(code?, items)
+	GET $conf_plcAddr/Plc.read?items=id,job
 
-示例：
+或通过code指定从哪个PLC读字段：
 
-	GET $conf_plcdAddr/api/Plc.read?code=plc1&items=id,job
+	GET $conf_plcAddr/Plc.read?code=plc1&items=id,job
 
-根据code和字段名，在plc.json配置文件中查找相应地址并读写。
-如果未指定code, 则取配置中第1个。
+- items: 字段名列表，多个以逗号分隔。根据items中指定的字段名，在plc.json配置文件中查找相应地址并读写。
+特别地，当items设置为ALL时，表示取所有定义的字段，目前用于监控页。
 
-特别地，当items设置为ALL时，表示取所有地址，目前用于监控页。
+- code: PLC编码，可选参数。字段名默认在在所有PLC配置里查找，如果指定了code, 则取该code对应PLC中定义的字段名。
+
+注意：不指定code时，所有要读的字段必须在同一PLC上，否则将会报错找不到字段。
+
+返回JSON数组，第1项表示返回码，0为成功，非0为失败。
+成功时第2项为返回数据，不同接口返回格式参考协议。失败时第2项为错误信息，第3项为调试信息。
+
+成功返回示例：
+
+	[0, {id: 99, job: 23}]
+
+失败返回示例：
+
+	[1, "接口错误", "unknown ac 'xxx'"]
+
+如果需要JSON对象式的返回格式，可以加URL参数retfn=obj （以下其它接口也适用）：
+
+	GET $conf_plcAddr/Plc.read?code=plc1&items=id,job
+
+成功返回示例：
+
+	{code: 0, data: {id:99, job: 23}}
+
+失败返回示例：
+
+	{code: 1, message: "接口错误", debug: "unknown ac 'xxx'"}
 
 ### 写PLC
 
-	Plc.write(code?)(items...)
-
-给PLC下发任务，比如写plc1(某PLC编码):
+给PLC下发任务示例:
 
 ```http
-POST $conf_plcdAddr/api/write?code=plc1
+POST $conf_plcAddr/write?code=plc1
 
 {
     task1Id: 1001, // 拧紧枪任务号
@@ -111,8 +140,14 @@ POST $conf_plcdAddr/api/write?code=plc1
 }
 ```
 
-如果未指定code, 则取配置中第1个。
+POST内容中为要写入的字段名，默认在在所有PLC配置里查找，如果指定了code, 则取该code对应PLC中定义的字段名。
 经配置转换后，plcserver向转换后的地址写数据. 
+
+注意：不指定code时，所有要读的字段必须在同一PLC上，否则将会报错找不到字段。
+
+成功返回示例：
+
+	[0, "write plc ok"]
 
 ### PLC数据变化监控
 

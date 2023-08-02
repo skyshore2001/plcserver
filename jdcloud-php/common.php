@@ -55,7 +55,7 @@ $ERRINFO = [
 class MyException extends LogicException 
 {
 	function __construct($code, $internalMsg = null, $outMsg = null, $ex = null) {
-		parent::__construct($outMsg, $code, $ex);
+		parent::__construct(($outMsg?:""), $code, $ex);
 		$this->internalMsg = $internalMsg;
 		if ($code && !$outMsg) {
 			global $ERRINFO;

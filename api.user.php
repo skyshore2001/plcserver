@@ -33,6 +33,12 @@ function api_stat($env)
 	return $rv;
 }
 
+function api_reload($env)
+{
+	global $server;
+	return $server->reload();
+}
+
 function api_push($env)
 {
 	$app = $env->mparam("app");
@@ -40,15 +46,14 @@ function api_push($env)
 	$msg = $env->mparam("msg");
 	if (is_array($msg))
 		$msg = jsonEncode($msg);
-	return pushMsg($app, $user, $msg);
+	return JDServer::pushMsg($app, $user, $msg);
 }
 
 function api_getUsers($env)
 {
-	global $clientMap;
 	$app = $env->mparam("app");
 	$ret = [];
-	foreach ($clientMap as $fd => $cli) {
+	foreach (JDServer::$clientMap as $fd => $cli) {
 		if ($cli['app'] == $app) {
 			$ret[] = $cli['user'];
 		}
