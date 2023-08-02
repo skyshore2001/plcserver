@@ -196,6 +196,30 @@ class JDServer
 	// 用于websocket用户；允许一个用户多次出现，都能收到消息。
 	static $clientMap = []; // fd => {app, user, isHttp?, tmr?}
 
+	static $fileTypes = [
+		'html' => 'text/html; charset=utf-8',
+		'json' => 'application/json; charset=utf-8',
+		'js' => 'application/javascript; charset=utf-8',
+		'css' => 'text/css',
+		'jpg'=>'image/jpeg',
+		'jpeg'=>'image/jpeg',
+		'png'=>'image/png',
+		'gif'=>'image/gif',
+		'ico' => 'image/x-icon',
+		'txt'=>'text/plain',
+		'pdf' => 'application/pdf',
+		'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		'doc' => 'application/msword',
+		'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		'xls' => 'application/vnd.ms-excel',
+		'zip' => 'application/zip',
+		'rar' => 'application/x-rar-compressed',
+		'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+		'ppt' => 'application/vnd.ms-powerpoint',
+		'mp3' => 'audio/mpeg',
+		'm4a' => 'audio/mp4',
+		'mp4' => 'video/mp4',
+	];
 	// websocket message
 	static function onMessage($ws, $frame) {
 	//	echo("onMessage(websocket): fd=" . $frame->fd . ", data=" . $frame->data . "\n");
@@ -269,7 +293,7 @@ class JDServer
 		$ac = $req->server['path_info']; // 即url
 		if ($ac == '/')
 			$ac = '/index.html';
-		if (preg_match('/\.(html|json|js|css|jpg|png)$/', $ac, $ms)) {
+		if (preg_match('/\.(\w+)$/', $ac, $ms) && array_key_exists($ms[1], self::$fileTypes)) {
 			$res->header("cache-control", "no-cache");
 			$f = substr($ac, 1);
 			if (! file_exists($f)) {
@@ -277,14 +301,7 @@ class JDServer
 				$res->end();
 				return;
 			}
-			$ct = [
-				'html' => 'text/html; charset=utf-8',
-				'json' => 'application/json; charset=utf-8',
-				'js' => 'application/javascript; charset=utf-8',
-				'css' => 'text/css',
-				'jpg' => 'image/jpeg',
-				'png' => 'image/png'
-			][$ms[1]] ?: 'text/plain';
+			$ct = self::$fileTypes[$ms[1]];
 			$res->header('Content-Type', $ct);
 			$res->sendfile($f);
 			return;
