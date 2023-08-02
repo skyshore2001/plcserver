@@ -5,36 +5,23 @@ class AC_Plc extends JDApiBase
 	static $conf, $tmConf;
 
 	function api_read() {
-		$plcCode = $this->env->param("code");
-		$items = explode(',', $this->env->mparam("items"));
+		$plcCode = $this->env->param("code", null, "G");
+		$items = explode(',', $this->env->mparam("items", null, "G"));
 		if (count($items) == 0)
 			return;
 
 		$conf = self::loadPlcConf();
-		$found = false;
-		foreach ($conf as $plcCode0 => $plcConf) {
-			if ($plcCode === null)
-				$plcCode = $plcCode0;
-			if ($plcCode0 == $plcCode) {
-				if ($plcConf["disabled"])
-					jdRet(E_FORBIDDEN, "plc $plcCode is disabled");
-				$found = true;
-				break;
-			}
-		}
-		if (!$found)
-			jdRet(E_PARAM, "unknown plc $plcCode");
-
+		$plcConf = self::findPlc($conf, $plcCode, $items);
 		return self::readItems($plcConf, $items);
 	}
 
 	static protected function loadPlcConf() {
 		clearstatcache();
-		$tmConf = filemtime("plc.json");
+		@$tmConf = filemtime("plc.json");
 		if ($tmConf === self::$tmConf)
 			return self::$conf;
 
-		$confStr = file_get_contents("plc.json");
+		@$confStr = file_get_contents("plc.json");
 		if (! $confStr)
 			return [];
 		$conf = jsonDecode($confStr);
@@ -73,27 +60,40 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_write() {
-		$plcCode = $this->env->param("code");
+		$plcCode = $this->env->param("code", null, "G");
 		$items = $this->env->_POST;
 		if (count($items) == 0)
 			return;
 
 		$conf = self::loadPlcConf();
-		$found = false;
+		$plcConf = self::findPlc($conf, $plcCode, array_keys($items));
+		self::writeItems($plcConf, $items);
+		return "write plc ok";
+	}
+
+	// retrun: plcConf
+	static function findPlc($conf, &$plcCode, $items)
+	{
+		if (count($items) == 0)
+			jdRet(E_PARAM, "require items");
+		if (count($conf) == 0)
+			jdRet(E_SERVER, "no plc configured");
+		$itemCode = $items[0];
+		$ret = null;
 		foreach ($conf as $plcCode0 => $plcConf) {
-			if ($plcCode === null)
+			if (($plcCode === $plcCode0 || $plcCode === null) && 
+				($itemCode == 'ALL' || array_key_exists($itemCode, $plcConf["items"]))
+			) {
 				$plcCode = $plcCode0;
-			if ($plcCode0 == $plcCode) {
-				if ($plcConf["disabled"])
-					jdRet(E_FORBIDDEN, "plc $plcCode is disabled");
-				$found = true;
+				$ret = $plcConf;
 				break;
 			}
 		}
-		if (!$found)
-			jdRet(E_PARAM, "unknown plc $plcCode");
-		self::writeItems($plcConf, $items);
-		return "write plc ok";
+		if (!$ret)
+			jdRet(E_PARAM, "cannot find plc item: $itemCode");
+		if ($plcConf["disabled"])
+			jdRet(E_FORBIDDEN, "item $itemCode on plc $plcCode is disabled");
+		return $ret;
 	}
 
 	static protected function readItems($plcConf, $items, $plcObj = null) {
@@ -208,7 +208,7 @@ class AC_Plc extends JDApiBase
 	static function create($addr) {
 		$rv = parse_url($addr);
 		$proto = ($rv['scheme'] ?: "s7");
-		if (! in_array($proto, ["s7", "modbus"]))
+		if (! in_array($proto, ["s7", "modbus", "mock"]))
 			jdRet(E_PARAM, "unsupported plc addr protocol: `$proto`", "PLC地址错误: $addr");
 		$addr1 = $rv["host"];
 		if ($rv["port"]) {

@@ -65,7 +65,7 @@ var schema = {
 			addr: {
 				type: "string",
 				required: true,
-				description: "e.g. <code>s7://127.0.0.1</code>(tcp port 102) <code>modbus://192.168.1.1</code> (tcp port 502)"
+				description: "e.g. <code>s7://127.0.0.1</code>(tcp port 102) <code>modbus://192.168.1.1</code> (tcp port 502) <code>mock://local</code>"
 			},
 			dscr: {
 				type: "string",
@@ -89,6 +89,7 @@ var schema = {
 							required: true,
 							description: "s7地址: <code>DB21.0:word</code> <code>DB21.0.0:bit</code> <code>DB21.0.0:bit[2]</code> <code>DB21.2:char[8]</code> <code>DB21.2:string[8]</code><br>" + 
 								"modbus地址: <code>S{slaveId}.{startAddr}:{type}</code> 示例: <code>S1.0:byte</code> <code>S1.0:word[4]</code><br>" +
+								"mock地址: <code>{addr}:{type}</code> 示例: <code>S1.0:byte</code> <code>S1.1:word[4]</code><br>" +
 								"类型: int8, uint8/byte, int16/int, uint16/word, int32/dint, uint32/dword, bit/bool, float, char[len], string[maxLen]",
 						},
 						dscr: {

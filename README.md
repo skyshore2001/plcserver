@@ -1,6 +1,6 @@
 # plcserver - PLC访问中间件
 
-在jdserver基础上，增加了PLC读、写、监控变化并回调功能，支持s7和modbus-tcp协议。
+在jdserver基础上，增加了PLC读、写、监控变化并回调功能，支持s7和modbus-tcp协议，以及用于测试的mock协议。
 见plc.example.json示例配置文件。
 
 在使用时，根据示例创建plc.json配置后，即可用HTTP接口进行PLC数据读写。
@@ -265,6 +265,11 @@ modbus协议地址格式为：
 	"A\x00\x01B"
 
 ## 本地模拟测试
+
+### plcserver模拟：使用mock协议
+
+可以将s7/modbus协议改成mock，这样就可以模拟读写接口以及回调。初始化值为全0，在写入值后会保存，直到重置或重启服务。
+mock协议会分析和处理字段类型，而字段地址不做具体解析，一般可直接用s7或modbus的地址。
 
 ### s7设备模拟
 

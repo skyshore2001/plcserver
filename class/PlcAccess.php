@@ -56,6 +56,10 @@ class PlcAccess
 			require_once("ModbusClient.php");
 			return new ModbusClient($addr);
 		}
+		// 模拟设备
+		else if ($proto == 'mock') {
+			return new PlcMockClient();
+		}
 		throw new PlcAccessException("unknown proto $proto");
 	}
 
@@ -298,3 +302,50 @@ class PlcAccess
 	}
 	*/
 }
+
+class PlcMockClient extends PlcAccess
+{
+	static private $values = []; // $itemCode => $value
+
+	// items: [ "S1.0:word", "S1.4:float" ]
+	// items: [ "S1.0:word[2]", "S1.4:float[2]" ]
+	// items: [ "S1.0:bit", "S1.4:bit[4]" ]
+	function read($items) {
+		$items1 = parent::read($items);
+		$ret = [];
+		foreach ($items1 as $item) {
+			// item: {code, type, amount, value?, slaveId, startAddr}
+			$value = 0;
+			if (array_key_exists($item["code"], self::$values)) {
+				$value0 = self::$values[$item["code"]];
+				$value = $this->readItem($item, $value0);
+			}
+			else {
+				if ($item["type"] == "char" || $item["type"] == "string") {
+					$value = "";
+				}
+				else if ($item["isArray"]) {
+					$value = [];
+					for ($i=0; $i<$item["amount"]; ++$i) {
+						$value[] = 0;
+					}
+				}
+			}
+			$ret[] = $value;
+		}
+		return $ret;
+	}
+
+	// items: [ ["S1.0:word", 30000], ["S1.4:float", 3.14]  ]
+	// items: [ ["S1.0:word[2]", [30000, 50000]], ["S1.4:float[2]", [3.14,99.8]]  ]
+	// items: [ ["S1.0:bit", 1], ["S1.4:bit[4]", [1,1,1,1]] ]
+	function write($items) {
+		$items1 = parent::write($items);
+		foreach ($items1 as $item) {
+			// item: {code, type, amount, value, slaveId, startAddr}
+			self::$values[$item["code"]] = $this->writeItem($item);
+		}
+		return "write ok";
+	}
+}
+
