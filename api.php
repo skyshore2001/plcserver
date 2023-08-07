@@ -196,6 +196,9 @@ class JDServer
 	// 用于websocket用户；允许一个用户多次出现，都能收到消息。
 	static $clientMap = []; // fd => {app, user, isHttp?, tmr?}
 
+	// reload时置true, 死循环协程应自觉退出
+	static $reloadFlag = false;
+
 	static $fileTypes = [
 		'html' => 'text/html; charset=utf-8',
 		'json' => 'application/json; charset=utf-8',
@@ -383,6 +386,23 @@ class JDServer
 		$GLOBALS["jdserver_event"]->trigger("push.$app", [$userSpec, $msg]);
 		return $n;
 	}
+
+	static function onWorkerExit($server, $workerId) {
+		JDServer::$reloadFlag = true;
+	}
+}
+
+// go()一旦异常,会导致整个进程所有协程退出, 所以应使用safeGo替代go, 失败时只影响当前协程
+function safeGo($fn)
+{
+	go(function () use ($fn) {
+		try {
+			$fn();
+		}
+		catch (Exception $ex) {
+			logit($ex);
+		}
+	});
 }
 
 class JDServerEvent

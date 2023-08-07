@@ -62,6 +62,10 @@ $server->on('Close', function ($ws, $fd) {
 	JDServer::onClose($ws, $fd);
 });
 
+$server->on("WorkerExit", function ($server, $workerId) {
+	JDServer::onWorkerExit($server, $workerId);
+});
+
 function writeLog($s)
 {
 	if (is_array($s))

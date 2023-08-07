@@ -4,11 +4,11 @@
 //putenv("P_DB=jdcloud.db");
 
 // use MySQL:
-putenv("P_DB=localhost/jdserver");
-putenv("P_DBCRED=test:1234");
+// putenv("P_DB=localhost/jdserver");
+// putenv("P_DBCRED=test:1234");
 
 // DONT use DB:
-//putenv("P_DB=null");
+putenv("P_DB=null");
 
 // test mode: default value=0
 // putenv("P_TEST_MODE=1");

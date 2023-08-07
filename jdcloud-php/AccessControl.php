@@ -1219,7 +1219,8 @@ setIf接口会检测readonlyFields及readonlyFields2中定义的字段不可更�
 		protected $table = "fiss.aiobjectdata";
 		protected function onInit() {
 			$db = "mysql:host=10.80.140.32;port=3306;dbname=fiss"; // 也可以连oracle, mssql等各种其它类型数据库，参考DBEnv
-			$this->env = new DBEnv("mysql", $db, "root", "123456");
+			$this->env = clone $this->env;
+			$this->env->changeDb("mysql", $db, "root", "123456");
 			// 这里是直接打开新连接的，如果一次接口调用中访问多次，则应全局缓存该连接
 		}
 	}
@@ -2193,7 +2194,7 @@ addCond用于添加查询条件，可以使用表的字段或虚拟字段(无须
 			if ($isExt !== $isExt1) {
 				jdRet(E_SERVER, "bad res: '$res'", "字段定义错误：外部虚拟字段与普通虚拟字段不可定义在一起，请分拆成多组，或明确定义`isExt`。");
 			}
-			if (preg_match_all('/\bt0\.(\w+)\b/u', $ms[1], $ms1)) {
+			if (preg_match_all('/\bt0\.(\w+)\b/u', ($ms[1]?:''), $ms1)) {
 				foreach ($ms1[1] as $e) {
 					$reqColSet[$e] = true;
 				}
@@ -3060,7 +3061,7 @@ FROM ($sql) t0";
 		// multihash
 		// multihash:keyField
 		// multihash:keyField,valueField
-		else if (preg_match('/^(multi)?hash (: (\w+) (,(\w+))?)?$/xu', $fmt, $ms)) {
+		else if ($fmt && preg_match('/^(multi)?hash (: (\w+) (,(\w+))?)?$/xu', $fmt, $ms)) {
 			list($keyField, $isMulti, $valueField) = [$ms[3], $ms[1], $ms[5]];
 			$ret1 = [];
 			foreach ($ret as $row) {

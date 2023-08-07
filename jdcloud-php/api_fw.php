@@ -1254,7 +1254,6 @@ class ApiLog
 {
 	private $env;
 
-	private $startTm;
 	private $id;
 
 	// for batch detail (ApiLog1)
@@ -1353,7 +1352,6 @@ res字段会记录返回数据200字节(出错时记录2000字节).
 	function logBefore()
 	{
 		$env = $this->env;
-		$this->startTm = $env->_SERVER("REQUEST_TIME_FLOAT") ?: microtime(true);
 
 		$content = $this->myVarExport($env->_GET, $this->logReqLen);
 		$ct = getContentType($env);
@@ -1406,7 +1404,7 @@ res字段会记录返回数据200字节(出错时记录2000字节).
 		// 不记日志的情况
 		if (!$this->id && (Conf::$enableApiLog == 0 || (Conf::$enableApiLog == 2 && $ret[0] == 0)))
 			return;
-		$t = microtime(true) - $this->startTm;
+		$t = microtime(true) - $this->env->startTm;
 		$iv = sprintf("%.0f", $t * 1000); // ms
 		if ($X_RET_STR == null)
 			$X_RET_STR = jsonEncode($ret, $env->TEST_MODE);
@@ -2547,6 +2545,7 @@ class JDEnv extends DBEnv
 同样的应用类型将以相同的方式登录系统。
  */
 	public $appName, $appType;
+	public $startTm;
 
 /*
 @var env.clientVer
@@ -2705,6 +2704,9 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 		$isUserFmt = false;
 
 		$isDefaultCall = ($ac === null);
+		if ($isDefaultCall) {
+			$this->startTm = $this->_SERVER("REQUEST_TIME_FLOAT") ?: microtime(true);
+		}
 		$isCLI = isCLI();
 		if ($isCLI || $isSubCall)
 			assert($ac != null);
@@ -2837,6 +2839,17 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 		}
 
 		if ($isDefaultCall) {
+/**
+@var conf_returnExecTime
+
+如果值为1, 将通过HTTP头返回接口执行时间, 示例:
+	X-Exec-Time: 13ms
+*/
+			if ($GLOBALS["conf_returnExecTime"] && $this->startTm) {
+				$t = microtime(true) - $this->startTm;
+				// 如果之前已输出, 此时可能无法输出header
+				@$this->header("X-Exec-Time", round($t*1000, 3) . "ms");
+			}
 			$this->echoRet($ret, $isUserFmt);
 		}
 		else {
@@ -3136,6 +3149,8 @@ e.g. {type: "a", ver: 2, str: "a/2"}
 
 	protected function setupSession()
 	{
+		if (session_status() != PHP_SESSION_NONE)
+			return;
 		# normal: "userid"; testmode: "tuserid"
 		$name = $this->appType . "id";
 		session_name($name);
@@ -3342,7 +3357,7 @@ $param或$postParam为null时，与空数组`[]`等价。
 			];
 		}
 		// Mozilla/5.0 (Linux; U; Android 4.1.1; zh-cn; MI 2S Build/JRO03L) AppleWebKit/533.1 (KHTML, like Gecko)Version/4.0 MQQBrowser/5.4 TBS/025440 Mobile Safari/533.1 MicroMessenger/6.2.5.50_r0e62591.621 NetType/WIFI Language/zh_CN
-		else if (preg_match('/MicroMessenger\/([0-9.]+)/', $this->_SERVER("HTTP_USER_AGENT"), $ms)) {
+		else if (preg_match('/MicroMessenger\/([0-9.]+)/', ($this->_SERVER("HTTP_USER_AGENT")?:''), $ms)) {
 			$ver = $ms[1];
 			$ret = [
 				"type" => "wx",

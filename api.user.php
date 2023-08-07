@@ -36,16 +36,26 @@ function api_stat($env)
 function api_reload($env)
 {
 	global $server;
+	JDServer::$reloadFlag = true;
+	foreach (JDServer::$clientMap as $fd => $cli) {
+		if (! @$cli["isHttp"]) { // websocket client
+			$server->close($fd);
+		}
+	}
 	return $server->reload();
 }
 
-function api_push($env)
+// $param为内部使用
+function api_push($env, $param = null)
 {
-	$app = $env->mparam("app");
-	$user = $env->mparam("user");
-	$msg = $env->mparam("msg");
-	if (is_array($msg))
-		$msg = jsonEncode($msg);
+	if ($param == null && $env->_POST && isArray012($env->_POST)) {
+		return array_map(function ($e) use ($env) {
+			return api_push($env, $e);
+		}, $env->_POST);
+	}
+	$app = $env->mparam("app", $param);
+	$user = $env->mparam("user", $param);
+	$msg = $env->mparam("msg", $param);
 	return JDServer::pushMsg($app, $user, $msg);
 }
 

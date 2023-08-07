@@ -121,6 +121,21 @@ https://learn.microsoft.com/en-us/sql/connect/odbc/linux-mac/installing-the-micr
 
 如果配置了P_DEBUG_LOG=1且P_DEBUG=9，则记录SQL调用日志到debug.log
 
+@var conf_dbinst DB浏览器-数据库实例配置
+
+使用SQL语句`show databases`或`show tables`可查看数据库或数据表的列表。
+除了当前数据库实例，也支持连接到其它数据库实例。配置示例：
+
+	$mssql_db = "odbc:DRIVER={SQL Server Native Client 11.0}; UID=sa; LANGUAGE=us_english; DATABASE=jdcloud; SERVER=.; PWD=ibdibd";
+	$oracle_db = "oci:dbname=10.30.250.131:1525/mesdzprd;charset=AL32UTF8";
+	$GLOBALS["conf_dbinst"] = [
+		// 实例名称 => [数据库类型，PDO连接字符串，用户，密码]
+		"本地测试mysql" => ["mysql", "mysql:host=localhost;port=3306;dbname=wms", "demo", "demo123"],
+		"mssql实例" => ["mssql", $mssql_db, "demo", "demo123"],
+		"sqlite实例" => ["sqlite", "sqlite:jdcloud.db"],
+		"oracle实例" => ["oracle", $oracle_db, "demo", "demo123"],
+	];
+
 ## 测试模式与调试等级
 
 @key P_TEST_MODE Integer。环境变量，允许测试模式。0-生产模式；1-测试模式；2-自动化回归测试模式(RTEST_MODE)
@@ -1780,6 +1795,13 @@ class DBEnv
 		$this->initEnv();
 	}
 
+	function changeDb($dbtype, $db, $user = null, $pwd = null) {
+		unset($this->DBH);
+		$this->DBTYPE = $dbtype;
+		$this->C = [$db, $user, $pwd];
+		$this->dbconn();
+	}
+
 	function addLog($data, $logLevel=0) {
 		if ($this->DEBUG_LOG == 1 && $this->DBG_LEVEL >= $logLevel) {
 			logit($data, true, 'debug');
@@ -1900,6 +1922,8 @@ class DBEnv
 
 	function execOne($sql, $getInsertId = false)
 	{
+		if ($this->DBTYPE === null)
+			return false;
 		$DBH = $this->dbconn();
 		$rv = $DBH->exec($sql, $getInsertId);
 		return $rv;
@@ -1907,6 +1931,8 @@ class DBEnv
 
 	function queryOne($sql, $assoc = false, $cond = null)
 	{
+		if ($this->DBTYPE === null)
+			return false;
 		$DBH = $this->dbconn();
 		if ($cond)
 			$sql = genQuery($sql, $cond);
@@ -1930,6 +1956,8 @@ class DBEnv
 
 	function queryAll($sql, $assoc = false, $cond = null)
 	{
+		if ($this->DBTYPE === null)
+			return false;
 		$DBH = $this->dbconn();
 		if ($cond)
 			$sql = genQuery($sql, $cond);
@@ -2537,6 +2565,7 @@ function name2id($refNameFields, $refIdField, $refTable, $nameFields, $opt = [])
 class JDPDO extends PDO
 {
 	public $skipLogCnt = 0;
+	public $lastExecTime = 0; // 上次执行SQL时间,单位:秒
 	private $logH;
 
 	static function create($dsn, $user, $pwd, $dbtype) {
@@ -2660,6 +2689,7 @@ class JDPDO extends PDO
 	// t0: start time
 	protected function checkTime($t0, $sql) {
 		$t = microtime(true) - $t0;
+		$this->lastExecTime = $t;
 		if ($t > getConf("conf_slowSqlTime")) {
 			$t = round($t, 2);
 			logit("-- slow sql: time={$t}s\n$sql\n", "slow");
@@ -2950,12 +2980,24 @@ trait JDEvent
 
 返回最后次调用的返回值，false表示中止之后事件调用 
 
-如果想在事件处理函数中返回复杂值，可使用$args传递，如下面返回一个数组：
+如果想在事件处理函数中返回值，可使用引用传递:
+
+	$obj->on('getResult', 'onGetResult');
+	$a = []; $b = null;
+	$obj->trigger('getResult', [&$a, &$b]);
+
+	function onGetResult(&$a, &$b)
+	{
+		$a[] = 100;
+		$b = 'hello';
+	}
+
+也可使用值传递, 通过一个对象来操作:
 
 	$obj->on('getResult', 'onGetResult');
 	$out = new stdclass();
 	$out->result = [];
-	$obj->trigger('getArray', [$out]);
+	$obj->trigger('getResult', [$out]);
 
 	function onGetResult($out)
 	{
