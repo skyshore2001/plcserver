@@ -46,13 +46,8 @@ class AC_Plc extends JDApiBase
 
 			if (count($watchItems) > 0) { // {itemCode=>item}
 				// 注意：配置变化后(watchPlc()中检查self::$tmConf)，将自动退出
-				go(function () use ($plcConf, $watchItems) {
-					try {
-						self::handleWatchItems($plcConf, $watchItems);
-					}
-					catch (Exception $ex) {
-						echo("*** handleWatchItems fails: $ex\n");
-					}
+				safeGo(function () use ($plcConf, $watchItems) {
+					self::handleWatchItems($plcConf, $watchItems);
 				});
 			}
 		}
@@ -63,7 +58,7 @@ class AC_Plc extends JDApiBase
 		$plcCode = $this->env->param("code", null, "G");
 		$items = $this->env->_POST;
 		if (count($items) == 0)
-			return;
+			return "no item";
 
 		$conf = self::loadPlcConf();
 		$plcConf = self::findPlc($conf, $plcCode, array_keys($items));
@@ -129,6 +124,7 @@ class AC_Plc extends JDApiBase
 		return preg_match('/:(char|string)/', $type);
 	}
 	static protected function writeItems($plcConf, $items, $plcObj = null) {
+		writeLog("!!! write: " . jsonEncode($items));
 		$items1 = []; // elem: [addr, value]
 		foreach ($items as $itemCode=>$value) { // code=>value
 			$found = false;
@@ -159,11 +155,6 @@ class AC_Plc extends JDApiBase
 		foreach ($watchItems as $code=>$e) {
 			$itemAddrList[] = $e['addr'];
 			$itemCodeList[] = $code;
-
-			@$url = $e['notifyUrl'] ?: $plcConf['notifyUrl'];
-			if (! $url) {
-				writeLog("*** error: require notifyUrl for watch item: $code");
-			}
 		}
 
 		self::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
@@ -177,18 +168,29 @@ class AC_Plc extends JDApiBase
 				}
 				else {
 					$oldValues[$i] = $value;
+
 					$code = $itemCodeList[$i];
+					$post = [];
+					$post[$code] = $value;
+					// writeLog("!!! item `$code` value change: " . jsonEncode($old) . " => " . jsonEncode($value));
 					$watch = $watchItems[$code]['watch'];
-					$post = [$code => $value];
-					writeLog("!!! item `$code` value change: " . jsonEncode($old) . " => " . jsonEncode($value));
 					if (is_array($watch)) {
 						$res = self::readItems($plcConf, $watch, $plcObj);
 						$post += $res;
 					}
-					@$url = $watchItems[$code]['notifyUrl'] ?: $plcConf['notifyUrl'];
-					if ($url) {
-						writeLog("!!! notify $url: " . jsonEncode($post));
-						httpCall($url, $post);
+					$s = jsonEncode($post);
+					writeLog("!!! change: $s");
+
+					safeGo(function () use ($post) {
+						$GLOBALS["jdserver_event"]->trigger("plc_change", [$post]);
+					});
+					foreach ([$plcConf["notifyUrl"], $watchItems[$code]['notifyUrl']] as $url) {
+						if (! $url)
+							continue;
+						// echo("notify $url\n");
+						safeGo(function () use ($url, $post) {
+							httpCall($url, $post);
+						});
 					}
 				}
 			}
@@ -230,7 +232,7 @@ class AC_Plc extends JDApiBase
 				$plc = self::create($addr);
 				while (true) {
 					// 配置更新后，退出协程
-					if ($tmConf !== self::$tmConf)
+					if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
 						return;
 					$res = $plc->read($items);
 					$cb($plc, $res);
@@ -240,6 +242,9 @@ class AC_Plc extends JDApiBase
 			catch (Exception $ex) {
 				logit($ex);
 			}
+			sleep(1);
+			if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
+				return;
 		}
 	}
 }
