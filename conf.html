@@ -126,6 +126,10 @@ var schema = {
 			},
 			disabled: {
 				type: "boolean"
+			},
+			enableLock: {
+				type: "boolean",
+				description: "有些设备不支持并发访问, 比如当一边内部在监控变量一边开web页查看时(并发读字段), 就会导致读出错误数据. 此时可勾上此项加锁访问"
 			}
 		}
 	}

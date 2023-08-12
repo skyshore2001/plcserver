@@ -115,7 +115,7 @@ class AC_Plc extends JDApiBase
 		if ($plcObj == null) {
 			$plcObj = self::create($plcConf["addr"]);
 		}
-		$res = $plcObj->read($items1);
+		$res = self::readPlcSafe($plcObj, $items1, $plcConf);
 		$ret = array_combine($items, $res);
 		return $ret;
 	}
@@ -145,7 +145,7 @@ class AC_Plc extends JDApiBase
 		if ($plcObj == null) {
 			$plcObj = self::create($plcConf["addr"]);
 		}
-		$res = $plcObj->write($items1);
+		$res = self::writePlcSafe($plcObj, $items1, $plcConf);
 	}
 
 	static protected function handleWatchItems($plcConf, $watchItems) {
@@ -157,7 +157,7 @@ class AC_Plc extends JDApiBase
 			$itemCodeList[] = $code;
 		}
 
-		self::watchPlc($plcConf['addr'], $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
+		self::watchPlc($plcConf, $itemAddrList, function ($plcObj, $values) use ($plcConf, $watchItems, $itemCodeList, &$oldValues) {
 			foreach ($values as $i=>$value) {
 				$old = $oldValues[$i];
 				if ($old === null) {
@@ -225,16 +225,16 @@ class AC_Plc extends JDApiBase
 		return $plc;
 	}
 
-	static function watchPlc($addr, $items, $cb) {
+	static function watchPlc($plcConf, $items, $cb) {
 		$tmConf = self::$tmConf;
 		while (true) {
 			try {
-				$plc = self::create($addr);
+				$plcObj = self::create($plcConf["addr"]);
 				while (true) {
 					// 配置更新后，退出协程
 					if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
 						return;
-					$res = $plc->read($items);
+					$res = self::readPlcSafe($plcObj, $items, $plcConf);
 					$cb($plc, $res);
 					sleep(1);
 				}
@@ -242,10 +242,59 @@ class AC_Plc extends JDApiBase
 			catch (Exception $ex) {
 				logit($ex);
 			}
-			sleep(1);
 			if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
 				return;
+			sleep(2);
 		}
+	}
+
+	static function readPlcSafe($plcObj, $items, $plcConf) {
+		$g = new PlcAccessLockGuard($plcConf);
+		return $plcObj->read($items);
+	}
+	static function writePlcSafe($plcObj, $items, $plcConf) {
+		$g = new PlcAccessLockGuard($plcConf);
+		return $plcObj->write($items);
+	}
+}
+
+// 协程信号量, 可实现互斥锁或信号同步. 注意: 不支持自旋(同一协程多次调用将死锁)
+class CoSemphore
+{
+	private $v;
+	function __construct($initV = 0) {
+		$this->v = $initV;
+	}
+	function wait($n = 1) {
+		while ($this->v <= 0) {
+			usleep(1000);
+		}
+		$this->v -= $n;
+	}
+	function signal($n = 1) {
+		$this->v += $n;
+	}
+}
+
+class PlcAccessLockGuard
+{
+	static $semMap = [];
+	private $sem = null;
+	function __construct($plcConf) {
+		if (! $plcConf["enableLock"])
+			return;
+		$key = $plcConf["code"];
+		$this->sem = self::$semMap[$key];
+		if (! $this->sem) {
+			writeLog("create plc access lock for `$key`");
+			$this->sem = self::$semMap[$key] = new CoSemphore(1);
+		}
+		$this->sem->wait();
+	}
+	function __destruct() {
+		if (!$this->sem)
+			return;
+		$this->sem->signal();
 	}
 }
 
