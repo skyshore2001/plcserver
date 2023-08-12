@@ -107,10 +107,11 @@ var schema = {
 						},
 						notifyUrl: {
 							type: "string",
-							description: "仅当开启watch时有效,未指定时自动使用PLC上的notifyUrl设置"
+							description: "仅当开启watch时有效,监控字段发生变化时的扩展回调地址(会先调用PLC上的notifyUrl设置)"
 						},
 						disabled: {
-							type: "boolean"
+							type: "boolean",
+							description: "禁止读写和监控,但可以在web页中查看"
 						}
 					},
 					options: {
@@ -122,10 +123,12 @@ var schema = {
 				}
 			},
 			notifyUrl: {
-				type: "string"
+				type: "string",
+				description: "监控字段发生变化时的回调地址"
 			},
 			disabled: {
-				type: "boolean"
+				type: "boolean",
+				description: "禁止所有字段的读写和监控,但可以在web页中查看"
 			},
 			enableLock: {
 				type: "boolean",

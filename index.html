@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
 <title>plcserver</title>
 <!--
@@ -38,7 +39,7 @@ th, td {
 	<div class="plc" v-for="(plc, plcname) in plcs">
 		<table class="items">
 			<tr>
-				<th style="width: 200px">PLC={{plcname}}</th>
+				<th style="width: 200px">PLC={{plcname}}<p v-if="plc.disabled" class="hint">(disabled)</p></th>
 				<th style="width: 200px">{{plc.addr}}</th>
 				<th style="width: 200px">{{plc.dscr}}</th>
 				<th></th>
@@ -50,7 +51,7 @@ th, td {
 				<th>备注</th>
 			</tr>
 			<tr class="item" v-for="(item, itemname) in plc.items">
-				<td>{{itemname}}<span style="color:red" v-if="item.watch">*</span></td>
+				<td>{{itemname}}<span style="color:red" v-if="item.watch">*</span><p v-if="item.disabled" class="hint">(disabled)</p></td>
 				<td>{{item.addr}}</td>
 				<td :class="{hl: item.hl}" align="right" @dblclick="setValue(plcname, itemname, item.val)">{{item.val}}</td>
 				<td><span class="hint">{{item.dscr}}</span></td>
