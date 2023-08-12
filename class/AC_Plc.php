@@ -227,6 +227,8 @@ class AC_Plc extends JDApiBase
 
 	static function watchPlc($plcConf, $items, $cb) {
 		$tmConf = self::$tmConf;
+		$lastEx = null;
+		$plcCode = $plcConf["code"];
 		while (true) {
 			try {
 				$plcObj = self::create($plcConf["addr"]);
@@ -236,11 +238,18 @@ class AC_Plc extends JDApiBase
 						return;
 					$res = self::readPlcSafe($plcObj, $items, $plcConf);
 					$cb($plc, $res);
+					if ($lastEx) {
+						logit("watchPlc ok for `$plcCode` (restored from error)");
+						$lastEx = null;
+					}
 					sleep(1);
 				}
 			}
 			catch (Exception $ex) {
-				logit($ex);
+				if (!$lastEx || $lastEx->getMessage() != $ex->getMessage()) {
+					logit("watchPlc fails for `$plcCode` (will skip the same error): " . $ex);
+					$lastEx = $ex;
+				}
 			}
 			if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
 				return;
