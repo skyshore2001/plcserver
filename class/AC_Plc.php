@@ -96,7 +96,7 @@ class AC_Plc extends JDApiBase
 			$items = array_keys($plcConf["items"]);
 			$items1 = array_map(function ($item) {
 				return $item["addr"];
-			}, $plcConf["items"]);
+			}, array_values($plcConf["items"]));
 		}
 		else {
 			$items1 = [];
