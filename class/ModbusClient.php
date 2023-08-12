@@ -50,7 +50,7 @@ class ModbusClient extends PlcAccess
 	function read($items) {
 		$items1 = parent::read($items);
 		$ret = [];
-		foreach ($items1 as $item) {
+		foreach ($items1 as $i=>$item) {
 			// item: {code, type, amount, value?, slaveId, startAddr}
 			$readPacket = $this->buildReadPacket($item);
 			$res = $this->req($readPacket, $pos);
@@ -65,7 +65,7 @@ class ModbusClient extends PlcAccess
 				$expectedCnt = ceil($item["amount"] / 8);
 			}
 			if ($expectedCnt != $byteCnt) {
-				$error = "item `$addr`: wrong response byte count: expect $expectedCnt, actual $byteCnt";
+				$error = "item `{$items[$i]}`: wrong response byte count: expect $expectedCnt, actual $byteCnt";
 				throw new PlcAccessException($error);
 			}
 			$value0 = substr($res, $pos, $byteCnt);

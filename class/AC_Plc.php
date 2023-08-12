@@ -179,7 +179,7 @@ class AC_Plc extends JDApiBase
 						$post += $res;
 					}
 					$s = jsonEncode($post);
-					writeLog("!!! change: $s");
+					writeLog("!!! change: $s" . " <= " . jsonEncode($old));
 
 					safeGo(function () use ($post) {
 						$GLOBALS["jdserver_event"]->trigger("plc_change", [$post]);
