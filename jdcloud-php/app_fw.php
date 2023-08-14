@@ -293,8 +293,9 @@ initAppFw();
 // }}}
 
 // load user config
-$userConf = "{$BASE_DIR}/conf.user.php";
-file_exists($userConf) && include_once($userConf);
+foreach (["{$BASE_DIR}/conf.user.template.php", "{$BASE_DIR}/conf.user.php"] as $userConf) {
+	file_exists($userConf) && include_once($userConf);
+}
 
 // ====== functions {{{
 function initAppFw()
