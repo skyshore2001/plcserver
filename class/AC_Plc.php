@@ -113,9 +113,9 @@ class AC_Plc extends JDApiBase
 			}
 		}
 		if ($plcObj == null) {
-			$plcObj = self::create($plcConf["addr"]);
+			$plcObj = self::create($plcConf["addr"], $plcConf);
 		}
-		$res = self::readPlcSafe($plcObj, $items1, $plcConf);
+		$res = $plcObj->read($items1);
 		$ret = array_combine($items, $res);
 		return $ret;
 	}
@@ -143,9 +143,9 @@ class AC_Plc extends JDApiBase
 				jdRet(E_PARAM, "unknown plc item: {$plcConf['code']}.$itemCode");
 		}
 		if ($plcObj == null) {
-			$plcObj = self::create($plcConf["addr"]);
+			$plcObj = self::create($plcConf["addr"], $plcConf);
 		}
-		$res = self::writePlcSafe($plcObj, $items1, $plcConf);
+		$res = $plcObj->write($items1);
 	}
 
 	static protected function handleWatchItems($plcConf, $watchItems) {
@@ -207,12 +207,23 @@ class AC_Plc extends JDApiBase
 	}
 
 	function api_test() {
-		$plc = self::create("127.0.0.1");
+		$plc = self::create("127.0.0.1", null);
 		$rv = $plc->write([["DB21.0:int32", 90000], ["DB21.4:float", 3.14]]);
 		$plc->read(["DB21.0:int32", "DB21.4:float"]);
 	}
 
-	static function create($addr) {
+	// 某些PLC设备（如modbus按钮盒）只支持单个连接轮询。当存在多个连接时，读出错误很可能错乱。
+	// 在PLC配置上设置forceSingleAccess=true，确保底层只使用单个plcObj对象（单个连接）访问同一设备。
+	private static $plcProxyMap = []; // addr=>plcProxy
+
+	static function create($addr, $plcConf) {
+		if ($plcConf && $plcConf["forceSingleAccess"]) {
+			if (! array_key_exists($addr, self::$plcProxyMap)) {
+				$plcObj = self::create($addr, null);
+				self::$plcProxyMap[$addr] = new PlcAccessProxy($plcObj);
+			}
+			return self::$plcProxyMap[$addr];
+		}
 		$rv = parse_url($addr);
 		$proto = ($rv['scheme'] ?: "s7");
 		if (! in_array($proto, ["s7", "modbus", "mock"]))
@@ -221,8 +232,8 @@ class AC_Plc extends JDApiBase
 		if ($rv["port"]) {
 			$addr1 .= ":" . $rv["port"];
 		}
-		$plc = PlcAccess::create($proto, $addr1);
-		return $plc;
+		$plcObj = PlcAccess::create($proto, $addr1);
+		return $plcObj;
 	}
 
 	static function watchPlc($plcConf, $items, $cb) {
@@ -231,12 +242,12 @@ class AC_Plc extends JDApiBase
 		$plcCode = $plcConf["code"];
 		while (true) {
 			try {
-				$plcObj = self::create($plcConf["addr"]);
+				$plcObj = self::create($plcConf["addr"], $plcConf);
 				while (true) {
 					// 配置更新后，退出协程
 					if ($tmConf !== self::$tmConf || JDServer::$reloadFlag)
 						return;
-					$res = self::readPlcSafe($plcObj, $items, $plcConf);
+					$res = $plcObj->read($items);
 					$cb($plc, $res);
 					if ($lastEx) {
 						logit("watchPlc ok for `$plcCode` (restored from error)");
@@ -256,18 +267,10 @@ class AC_Plc extends JDApiBase
 			sleep(2);
 		}
 	}
-
-	static function readPlcSafe($plcObj, $items, $plcConf) {
-		$g = new PlcAccessLockGuard($plcConf);
-		return $plcObj->read($items);
-	}
-	static function writePlcSafe($plcObj, $items, $plcConf) {
-		$g = new PlcAccessLockGuard($plcConf);
-		return $plcObj->write($items);
-	}
 }
 
-// 协程信号量, 可实现互斥锁或信号同步. 注意: 不支持自旋(同一协程多次调用将死锁)
+// 协程信号量, 可实现互斥锁或信号同步.
+// TODO: 目前不支持自旋(同一协程多次调用将死锁). 可利用Co::getCid()判断是否同一协程调用.
 class CoSemphore
 {
 	private $v;
@@ -279,31 +282,34 @@ class CoSemphore
 			usleep(1000);
 		}
 		$this->v -= $n;
+		// writeLog(Co::getCid() . "wait");
 	}
 	function signal($n = 1) {
 		$this->v += $n;
+		// writeLog(Co::getCid() . "signal");
 	}
 }
 
-class PlcAccessLockGuard
+class PlcAccessProxy
 {
-	static $semMap = [];
+	private $plcObj;
 	private $sem = null;
-	function __construct($plcConf) {
-		if (! $plcConf["enableLock"])
-			return;
-		$key = $plcConf["code"];
-		$this->sem = self::$semMap[$key];
-		if (! $this->sem) {
-			writeLog("create plc access lock for `$key`");
-			$this->sem = self::$semMap[$key] = new CoSemphore(1);
-		}
-		$this->sem->wait();
+	function __construct($plcObj) {
+		$this->plcObj = $plcObj;
+		$this->sem = new CoSemphore(1);
 	}
-	function __destruct() {
-		if (!$this->sem)
-			return;
-		$this->sem->signal();
+	function read($items) {
+		$this->sem->wait();
+		$g = new Guard(function () {
+			$this->sem->signal();
+		});
+		return $this->plcObj->read($items);
+	}
+	function write($items) {
+		$this->sem->wait();
+		$g = new Guard(function () {
+			$this->sem->signal();
+		});
+		return $this->plcObj->write($items);
 	}
 }
-
