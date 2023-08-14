@@ -76,6 +76,8 @@ var vm = new Vue({
 		update() {
 			const this_ = this;
 			for (const [plcname, plc] of Object.entries(this.plcs)) {
+				if (plc.disabled)
+					continue;
 				const rv = callSvr(makeUrl("Plc.read", {code: plcname, items: "ALL"}), null, {jdcloud: 0});
 				rv.then(function (data) {
 					api_PlcRead(data, plcname, plc);

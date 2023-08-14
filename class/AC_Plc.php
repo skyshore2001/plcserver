@@ -93,10 +93,13 @@ class AC_Plc extends JDApiBase
 
 	static protected function readItems($plcConf, $items, $plcObj = null) {
 		if ($items[0] == 'ALL') {
-			$items = array_keys($plcConf["items"]);
-			$items1 = array_map(function ($item) {
-				return $item["addr"];
-			}, array_values($plcConf["items"]));
+			$items = [];
+			foreach ($plcConf["items"] as $itemCode => $item) {
+				if ($item["disabled"])
+					continue;
+				$items[] = $itemCode;
+				$items1[] = $item["addr"];
+			}
 		}
 		else {
 			$items1 = [];
@@ -104,6 +107,8 @@ class AC_Plc extends JDApiBase
 				$found = false;
 				foreach ($plcConf["items"] as $itemCode0 => $item) {
 					if ($itemCode == $itemCode0) {
+						if ($item["disabled"])
+							jdRet(E_FORBIDDEN, null, "item `$itemCode` is disabled");
 						$items1[] = $item["addr"];
 						$found = true;
 					}
@@ -130,6 +135,8 @@ class AC_Plc extends JDApiBase
 			$found = false;
 			foreach ($plcConf["items"] as $itemCode0 => $item) {
 				if ($itemCode == $itemCode0) {
+					if ($item["disabled"])
+						jdRet(E_FORBIDDEN, null, "item `$itemCode` is disabled");
 					if (stripos($item["addr"], '[') !== false) {
 						if (! self::isStringType($item["addr"])) {
 							$value = explode(',', $value);
