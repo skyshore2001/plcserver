@@ -157,6 +157,8 @@ class ModbusClient extends PlcAccess
 		$res = fread($fp, 4096);
 		// TODO: 包可能没收全, 应根据下面长度判断
 		if (!$res) {
+			fclose($this->fp); // 关闭连接，确保单例再连接时安全
+			$this->fp = null;
 			$error = "read timeout or receive null response";
 			throw new PlcAccessException($error);
 		}
@@ -168,6 +170,8 @@ class ModbusClient extends PlcAccess
 			"C", "fnCode",
 		]);
 		if (($header["fnCode"] & 0x80) != 0) {
+			fclose($this->fp); // 关闭连接，确保单例再连接时安全
+			$this->fp = null;
 			$failCode = ord($res[8]);
 			$error = "response fail code=$failCode";
 			throw new PlcAccessException($error);
