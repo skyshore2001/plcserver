@@ -150,15 +150,23 @@ class ModbusClient extends PlcAccess
 	protected function req($req, &$pos) {
 		if ($this->fp === null) {
 			$this->fp = self::getTcpConn($this->addr, 502); // default modbus port
+			// stream_set_timeout($this->fp, 0, 100000); // 测试超时
 		}
+		// 异常时关闭连接，确保单例再连接时安全
+		$ok = false;
+		$g = new Guard(function () use (&$ok) {
+			if ($ok)
+				return;
+			fclose($this->fp);
+			$this->fp = null;
+		});
+
 		$fp = $this->fp;
 		$rv = fwrite($fp, $req);
 
 		$res = fread($fp, 4096);
 		// TODO: 包可能没收全, 应根据下面长度判断
 		if (!$res) {
-			fclose($this->fp); // 关闭连接，确保单例再连接时安全
-			$this->fp = null;
 			$error = "read timeout or receive null response";
 			throw new PlcAccessException($error);
 		}
@@ -170,13 +178,17 @@ class ModbusClient extends PlcAccess
 			"C", "fnCode",
 		]);
 		if (($header["fnCode"] & 0x80) != 0) {
-			fclose($this->fp); // 关闭连接，确保单例再连接时安全
-			$this->fp = null;
 			$failCode = ord($res[8]);
 			$error = "response fail code=$failCode";
 			throw new PlcAccessException($error);
 		}
+		// 比较transId一致
+		if (substr($res, 0, 2) != substr($req, 0, 2)) {
+			$error = "transId mismatch";
+			throw new PlcAccessException($error);
+		}
 		$pos = 8;
+		$ok = true;
 		return $res;
 	}
 

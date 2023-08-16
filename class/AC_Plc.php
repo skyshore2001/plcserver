@@ -265,9 +265,6 @@ class AC_Plc extends JDApiBase
 			}
 			catch (Exception $ex) {
 				$plcObj = null;
-				if ($plcConf["forceSingleAccess"]) {
-					unset(self::$plcProxyMap[$plcConf["addr"]]);
-				}
 				if (!$lastEx || $lastEx->getMessage() != $ex->getMessage()) {
 					logit("watchPlc fails for `$plcCode` (will skip the same error): " . $ex);
 					$lastEx = $ex;
