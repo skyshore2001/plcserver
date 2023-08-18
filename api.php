@@ -260,6 +260,7 @@ class JDServer
 			if (is_null($cli)) {
 				writeLog("*** require init message. recv from #{$fd}: {$frame->data}");
 				$ws->push($fd, '*** error: require init');
+				$ws->disconnect($fd);
 				return;
 			}
 			$app = $cli["app"];
@@ -342,6 +343,19 @@ class JDServer
 		$GLOBALS["X_APP"][Swoole\Coroutine::getcid()] = $env;
 		$env->callSvcSafe();
 		$res->end();
+	}
+
+	static function onOpen($ws, $req) {
+		$fd = $req->fd;
+		$addr = $req->server['remote_addr'];
+		$fw = $req->header['x-forwarded-for'];
+		if ($fw) {
+			$addr .= '; ' . $fw;
+			$fw1 = $req->header['x-forwarded-host'];
+			if ($fw1)
+				$addr .= " ($fw1)";
+		}
+		writeLog("new websocket user #$fd from $addr");
 	}
 
 	static function onClose($ws, $fd) {
