@@ -353,7 +353,7 @@ class JDServer
 			$addr .= '; ' . $fw;
 			$fw1 = $req->header['x-forwarded-host'];
 			if ($fw1)
-				$addr .= " ($fw1)";
+				$addr .= " (via $fw1)";
 		}
 		writeLog("new websocket user #$fd from $addr");
 	}
