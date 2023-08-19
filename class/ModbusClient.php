@@ -167,7 +167,10 @@ class ModbusClient extends PlcAccess
 		$res = fread($fp, 4096);
 		// TODO: 包可能没收全, 应根据下面长度判断
 		if (!$res) {
-			$error = "read timeout or receive null response";
+			if (feof($this->fp))
+				$error = "connection lost";
+			else
+				$error = "read timeout or receive null response";
 			throw new PlcAccessException($error);
 		}
 		$header = myunpack(substr($res, 0, 8), [

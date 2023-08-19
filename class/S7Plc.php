@@ -269,12 +269,19 @@ class S7Plc extends PlcAccess
 
 		$res = fread($fp, 4096);
 		if (!$res) {
-			$error = "read timeout or receive null response";
+			if (feof($this->fp))
+				$error = "connection lost";
+			else
+				$error = "read timeout or receive null response";
+			fclose($this->fp);
+			$this->fp = null;
 			throw new PlcAccessException($error);
 		}
 
 		$version = unpack("C", $res[0])[1]; // TPKT check
 		if ($version != 3) {
+			fclose($this->fp);
+			$this->fp = null;
 			$error = "bad response: bad protocol";
 			throw new PlcAccessException($error);
 		}
