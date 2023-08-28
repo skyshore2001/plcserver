@@ -340,9 +340,11 @@ class JDServer
 		}
 
 		$env = new SwooleEnv($req, $res);
-		$GLOBALS["X_APP"][Swoole\Coroutine::getcid()] = $env;
+		$cid = Swoole\Coroutine::getcid();
+		$GLOBALS["X_APP"][$cid] = $env;
 		$env->callSvcSafe();
 		$res->end();
+		unset($GLOBALS["X_APP"][$cid]);
 	}
 
 	static function onOpen($ws, $req) {
