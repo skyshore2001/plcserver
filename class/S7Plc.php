@@ -68,6 +68,23 @@ class S7Plc extends PlcAccess
 
 	// items: ["DB21.0:int32", "DB21.4:float", "DB21.0.0:bit"]
 	function read($items) {
+		// NOTE: snap7一次最多取约34个, 过多时应分批取. TODO: 此处还可先优化, 即合并连续字段, 如同1字节的8个位合并读取.
+		$MAX_CNT = 30;
+		if (count($items) <= $MAX_CNT)
+			return $this->read1($items);
+
+		$ret = [];
+		for ($i=0; $i<count($items); $i+=$MAX_CNT) {
+			$items1 = array_slice($items, $i, $MAX_CNT);
+			$rv = $this->read1($items1);
+			foreach ($rv as $e) {
+				$ret[] = $e;
+			}
+		}
+		return $ret;
+	}
+
+	protected function read1($items) {
 		$items1 = parent::read($items);
 		$readPacket = $this->buildReadPacket($items1);
 		$res = $this->isoExchangeBuffer($readPacket, $pos);
