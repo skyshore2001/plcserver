@@ -117,7 +117,7 @@ var schema = {
 					options: {
 						// 配置headerTemplate
 						onNotify: function (val, isManualChange) {
-							return val.name + (val.watch? ' *': '');
+							return val.name + (val.watch? ' *': '') + (val.disabled? ' (disabled)': '');
 						},
 					}
 				}
