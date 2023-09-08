@@ -15,7 +15,13 @@ class AC_Plc extends JDApiBase
 		return self::readItems($plcConf, $items);
 	}
 
+	static protected $sem_loadPlcConf = null;
 	static protected function loadPlcConf() {
+		if (self::$sem_loadPlcConf == null)
+			self::$sem_loadPlcConf = new CoSemphore(1);
+		// lock
+		$lock = new CoLockGuard(self::$sem_loadPlcConf);
+
 		clearstatcache();
 		@$tmConf = filemtime("plc.json");
 		if ($tmConf === self::$tmConf)
@@ -295,6 +301,19 @@ class CoSemphore
 	function signal($n = 1) {
 		$this->v += $n;
 		// writeLog(Co::getCid() . "signal");
+	}
+}
+
+// 注意：不能继承Guard
+class CoLockGuard
+{
+	private $sem = null;
+	function __construct(CoSemphore $sem) {
+		$this->sem = $sem;
+		$this->sem->wait();
+	}
+	function __destruct() {
+		$this->sem->signal();
 	}
 }
 
