@@ -12,7 +12,10 @@ class AC_Plc extends JDApiBase
 
 		$conf = self::loadPlcConf();
 		$plcConf = self::findPlc($conf, $plcCode, $items);
-		return self::readItems($plcConf, $items);
+
+		return callWithRetry(function () use ($plcConf, $items) {
+			return self::readItems($plcConf, $items);
+		}, "Plc.read");
 	}
 
 	static protected $sem_loadPlcConf = null;
@@ -68,8 +71,10 @@ class AC_Plc extends JDApiBase
 
 		$conf = self::loadPlcConf();
 		$plcConf = self::findPlc($conf, $plcCode, array_keys($items));
-		self::writeItems($plcConf, $items);
-		return "write plc ok";
+		return callWithRetry(function () use ($plcConf, $items) {
+			self::writeItems($plcConf, $items);
+			return "write plc ok";
+		}, "Plc.write");
 	}
 
 	// retrun: plcConf
@@ -340,3 +345,27 @@ class PlcAccessProxy
 		return $this->plcObj->write($items);
 	}
 }
+
+function callWithRetry($fn, $apiName)
+{
+	$retryCnt = $GLOBALS["conf_retry_cnt"] ?: 0;
+	if (!$retryCnt)
+		return $fn();
+	$i = 0;
+	while (true) {
+		try {
+			return $fn();
+		}
+		catch (Exception $ex) {
+			if ($i < $retryCnt) {
+				++ $i;
+				logit("fail to call `$apiName` (will retry $i): $ex");
+				usleep(rand(20000, 100000)); // 20-100ms
+			}
+			else {
+				throw $ex;
+			}
+		}
+	}
+}
+

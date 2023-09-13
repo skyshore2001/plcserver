@@ -17,3 +17,6 @@ putenv("P_DB=null");
 // putenv("P_DEBUG=9");
 // putenv("P_DEBUG_LOG=1"); // 0: no log to 'debug.log' 1: all log, 2: error log
 
+// Plc.read/Plc.write接口读写失败后重试次数, 2表示最多3次
+$GLOBALS["conf_retry_cnt"] = 2;
+
