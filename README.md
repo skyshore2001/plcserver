@@ -248,9 +248,13 @@ modbus协议地址格式为：
 - int32/dint
 - uint32/dword
 - bit/bool
-- float
+- float (real/单精度4B-6位有效数字)
+- double (lreal/双精度8B-15位有效数字)
 - char[最大长度]
-- string[最大长度]
+- string[最大长度] (西门子PLC支持长度0-254)
+- TODO: wchar[最大长度]
+- TODO: wstring[最大长度] (西门子PLC支持长度0-65534)
+(西门子S7-1200类型参考: https://www.ad.siemens.com.cn/productportal/Prods/S7-1200_PLC_EASY_PLUS/function/DB_Data%20type/DB_date%20type.html)
 
 数组读写：
 

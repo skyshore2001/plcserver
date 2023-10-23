@@ -30,8 +30,8 @@ class PlcAccess
 		"int64" => ["fmt"=>"J", "len"=>8],
 		"uint64" => ["fmt"=>"J", "len"=>8],
 
-		"float" => ["fmt"=>"f", "len"=>4],
-		"double" => ["fmt"=>"d", "len"=>8],
+		"float" => ["fmt"=>"G", "len"=>4],
+		"double" => ["fmt"=>"E", "len"=>8],
 
 		"char" => ["fmt"=>"a", "len"=>1],
 		"string" => ["fmt"=>"a", "len"=>1]
