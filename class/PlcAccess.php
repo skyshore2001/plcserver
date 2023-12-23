@@ -6,6 +6,9 @@ class PlcAccessException extends LogicException
 
 class PlcAccess
 {
+	protected $opt = []; // {byteorder=0}
+	protected $minByteCntForOrder = 2;
+
 	static protected $typeAlias = [
 		"bool" => "bit",
 		"byte" => "uint8",
@@ -47,18 +50,22 @@ class PlcAccess
 	}
 
 	// $plc = PlcAccess::create("s7", "192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
-	static function create($proto, $addr) {
+	static function create($proto, $addr, $opt) {
 		if ($proto == 's7') {
 			require_once("S7Plc.php");
-			return new S7Plc($addr);
+			$plcObj = new S7Plc($addr, $opt);
 		}
 		else if ($proto == 'modbus') {
 			require_once("ModbusClient.php");
-			return new ModbusClient($addr);
+			$plcObj = new ModbusClient($addr, $opt);
 		}
 		// 模拟设备
 		else if ($proto == 'mock') {
-			return new PlcMockClient();
+			$plcObj = new PlcMockClient();
+		}
+		if (isset($plcObj)) {
+			$plcObj->opt = $opt;
+			return $plcObj;
 		}
 		throw new PlcAccessException("unknown proto $proto");
 	}
@@ -110,12 +117,15 @@ class PlcAccess
 		else if ($t == "bit") {
 			return self::readBitItem($item, $value0);
 		}
-		else if (! $item["isArray"]) {
-			$value = unpack($packFmt, $value0)[1];
-		}
-		else { // 数组
-			$rv = unpack($packFmt.$item["amount"], $value0);
-			$value = array_values($rv);
+		else {
+			$this->handleByteOrder($value0, self::$typeMap[$t]["len"]);
+			if (! $item["isArray"]) {
+				$value = unpack($packFmt, $value0)[1];
+			}
+			else { // 数组
+				$rv = unpack($packFmt.$item["amount"], $value0);
+				$value = array_values($rv);
+			}
 		}
 		self::fixInt($item["type"], $value);
 		return $value;
@@ -153,14 +163,18 @@ class PlcAccess
 		if ($t == "char" || $t == "string") {
 			$valuePack = $item["value"];
 		}
-		else if ($item["isArray"]) { // 数组处理
-			$valuePack = '';
-			foreach ($item["value"] as $v) {
-				$valuePack .= pack($packFmt, $v);
-			}
-		}
 		else {
-			$valuePack = pack($packFmt, $item["value"]);
+			if ($item["isArray"]) { // 数组处理
+				$valuePack = '';
+				foreach ($item["value"] as $v) {
+					$valuePack .= pack($packFmt, $v);
+				}
+			}
+			else {
+				$valuePack = pack($packFmt, $item["value"]);
+			}
+
+			$this->handleByteOrder($valuePack, self::$typeMap[$t]["len"]);
 		}
 		return $valuePack;
 	}
@@ -301,6 +315,37 @@ class PlcAccess
 		return $value;
 	}
 	*/
+
+	protected function handleByteOrder(&$v, $byteCnt) {
+		if ($this->opt["byteorder"] == 0 || $byteCnt < $this->minByteCntForOrder)
+			return;
+
+		$valueLen = strlen($v);
+		if ($valueLen > $byteCnt) {
+			$v2 = '';
+			for ($i=0; $i<$valueLen; $i+=$byteCnt) {
+				$v1 = substr($v, $i, $byteCnt);
+				$this->onHandleByteOrder($v1, $byteCnt);
+				$v2 .= $v1;
+			}
+			$v = $v2;
+		}
+		else {
+			$this->onHandleByteOrder($v, $byteCnt);
+		}
+	}
+	// 可定制字节序转换逻辑
+	protected function onHandleByteOrder(&$v, $byteCnt) {
+		if ($byteCnt == 2) {
+			$v = $v[1] . $v[0];
+		}
+		else if ($byteCnt == 4) {
+			$v = $v[3] . $v[2] . $v[1] . $v[0];
+		}
+		else if ($byteCnt == 8) {
+			$v = $v[7] . $v[6] . $v[5] . $v[4] . $v[3] . $v[2] . $v[1] . $v[0];
+		}
+	}
 }
 
 class PlcMockClient extends PlcAccess

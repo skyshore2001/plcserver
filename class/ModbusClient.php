@@ -210,4 +210,16 @@ class ModbusClient extends PlcAccess
 		$item["startAddr"] = $ms["startAddr"];
 		return $item;
 	}
+
+	// 字节序定制: modbus每个字传输是大端序，但一个类型包含多个字(如float/double)时存在字序问题(而不是字节序)
+	protected $minByteCntForOrder = 4;
+	protected function onHandleByteOrder(&$v, $byteCnt) {
+		// AB CD -> CD AB
+		if ($byteCnt == 4) {
+			$v = substr($v, 2, 2) . substr($v, 0, 2);
+		}
+		else if ($byteCnt == 8) {
+			$v = substr($v, 6, 2) . substr($v, 4, 2) . substr($v, 2, 2) . substr($v, 0, 2);
+		}
+	}
 }

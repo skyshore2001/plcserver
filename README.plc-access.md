@@ -51,13 +51,18 @@ modbus协议地址格式为：
 
 - S{slaveId}.{startAddr}:{type}
 - 注意：startAddr为0开始，以字(word)为单位(对比s7协议是字节为单位)
-读写bit对应coils，其它对应Holding registers.
+读写bit自动对应coils区（线圈寄存器），也称0区，modscan等软件中地址从1开始写成00001-09999，对应到本软件则为S1.0-S1.9998；
+读写其它类型则对应Holding registers（保持寄存器），也称4区，以4开头如40001-49999，也是对应本软件设置为S1.0-S1.9998。
 
 参数选项：
 
 -h : plc host. 缺省值=127.0.0.1, s7默认端口102，modbus默认端口502
 -p : proto. Enum(s7(default), modbus)
 -x : 写时以16进制设置，读后显示16进制数据。
+-byteorder: 字节序模式，默认为0，表示大端序（网络序）；如果为1，表示小端序。
+注意：s7协议使用大端序，一般无须配置该参数；
+modbus协议则取决于设备，可能会有小端序的设备；
+严格来说，modbus是字序而非字节序问题，因为modbus以字(2字节)为单位，每个字的传输使用大端序，但若一个类型包含多字（如float/double分别是2个/4个字），则存在字序问题。
 
 支持的类型如下：
 
@@ -114,8 +119,6 @@ modbus协议地址格式为：
 	php plc-access.php DB21.0:uint16[2]=0x6100,0x0162 DB21.0:byte[4] -x
 
 	php plc-access.php DB21.0:uint32=0x61000162 DB21.0:byte[4] -x
-
-TODO: 字节序一般为网络序(大端), 若为小端, 可在PlcAccess::typeMap里面为int16/int32等指定fmt2参数。
 
 ## PHP编程示例
 

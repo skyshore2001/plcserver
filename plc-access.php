@@ -11,6 +11,7 @@ command options:
 -h : plc host. default=127.0.0.1:102 for snap7, or 127.0.0.1:501 for modbus
 -x : use hex(16-based) number 
 -p : proto. Enum(s7(default), modbus)
+-byteorder: handle byte order
 
 modbus-tcp write and read:
 
@@ -44,6 +45,7 @@ $opt = [
 	"proto" => "s7",
 	"addr" => "127.0.0.1",
 	"useHex" => false,
+	"byteorder" => 0,
 	"read" => [],
 	"write" => []
 ];
@@ -67,6 +69,9 @@ foreach ($argv as $i=>$v) {
 		else if ($v == '-x') {
 			$opt['useHex'] = true;
 		}
+		else if ($v == '-byteorder') {
+			$value = "byteorder";
+		}
 		continue;
 	}
 	if (strpos($v, '=') !== false) {
@@ -84,10 +89,17 @@ foreach ($argv as $i=>$v) {
 		$opt['read'][] = $v;
 	}
 }
+if ($value) {
+	echo("*** error: missing param: $value\n");
+	exit(1);
+}
 
 echo("=== access plc {$opt['addr']}\n");
 try {
-	$plc = PlcAccess::create($opt['proto'], $opt['addr']);
+	$plcObjOpt = [
+		"byteorder" => $opt["byteorder"]
+	];
+	$plc = PlcAccess::create($opt['proto'], $opt['addr'], $plcObjOpt);
 	if ($opt['write']) {
 		beforeWrite($opt['write']);
 		$plc->write($opt['write']);
