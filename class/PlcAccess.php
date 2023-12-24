@@ -6,7 +6,7 @@ class PlcAccessException extends LogicException
 
 class PlcAccess
 {
-	protected $opt = []; // {byteorder=0}
+	protected $opt = ["byteorder" => 0];
 	protected $minByteCntForOrder = 2;
 
 	static protected $typeAlias = [
@@ -40,31 +40,33 @@ class PlcAccess
 		"string" => ["fmt"=>"a", "len"=>1]
 	];
 
-	static function readPlc($proto, $addr, $items) {
-		$plc = PlcAccess::create($proto, $addr);
+	static function readPlc($proto, $addr, $items, $opt = null) {
+		$plc = PlcAccess::create($proto, $addr, $opt);
 		return $plc->read($items);
 	}
-	static function writePlc($proto, $addr, $items) {
-		$plc = PlcAccess::create($proto, $addr);
+	static function writePlc($proto, $addr, $items, $opt = null) {
+		$plc = PlcAccess::create($proto, $addr, $opt);
 		return $plc->write($items);
 	}
 
 	// $plc = PlcAccess::create("s7", "192.168.1.101"); // default tcp port 102: "192.168.1.101:102"
-	static function create($proto, $addr, $opt) {
+	static function create($proto, $addr, $opt = null) {
 		if ($proto == 's7') {
 			require_once("S7Plc.php");
-			$plcObj = new S7Plc($addr, $opt);
+			$plcObj = new S7Plc($addr);
 		}
 		else if ($proto == 'modbus') {
 			require_once("ModbusClient.php");
-			$plcObj = new ModbusClient($addr, $opt);
+			$plcObj = new ModbusClient($addr);
 		}
 		// 模拟设备
 		else if ($proto == 'mock') {
 			$plcObj = new PlcMockClient();
 		}
 		if (isset($plcObj)) {
-			$plcObj->opt = $opt;
+			if (is_array($opt)) {
+				arrCopy($plcObj->opt, $opt);
+			}
 			return $plcObj;
 		}
 		throw new PlcAccessException("unknown proto $proto");
